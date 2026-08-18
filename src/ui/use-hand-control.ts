@@ -52,7 +52,15 @@ interface FrameCallbackHost {
 }
 interface Smoothers { x: Smoother; y: Smoother; pinch: Smoother; spread: Smoother }
 
-const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm';
+/**
+ * MUST match the installed @mediapipe/tasks-vision version. A mismatch 404s the
+ * whole fileset and hand tracking fails with a misleading "check your
+ * connection" — which is exactly what happened when this was pinned to 0.10.22
+ * while 1.0.1 was installed. tests/ui/hand-control-version.test.ts fails the
+ * build if these ever drift apart again.
+ */
+const MEDIAPIPE_VERSION = '1.0.1';
+const WASM_ROOT = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 

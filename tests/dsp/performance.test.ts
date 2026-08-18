@@ -13,13 +13,25 @@ describe('performance budget', () => {
     for (let i = 0; i < 500; i++) { out.fill(0); vm.render(out, 128); }
 
     const blocks = Math.floor((SR * 10) / 128);
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < blocks; i++) { out.fill(0); vm.render(out, 128); }
-    const elapsed = Number(process.hrtime.bigint() - t0) / 1e9;
 
-    const cpuFraction = elapsed / 10;
-    console.log(`  8 voices = ${(cpuFraction * 100).toFixed(2)}% of one core`);
-    // Spec budget: 5% of a core on desktop. Node/V8 is the proxy; the
+    /*
+     * Best of three, not a single pass. A one-shot measurement fails whenever
+     * something else is using the machine — a dev server, a browser, another
+     * test file — which made this gate flaky and therefore worthless. The
+     * minimum is the least-contended sample, so it measures what the DSP costs
+     * rather than what the laptop happened to be doing.
+     */
+    let best = Infinity;
+    for (let pass = 0; pass < 3; pass++) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < blocks; i++) { out.fill(0); vm.render(out, 128); }
+      const elapsed = Number(process.hrtime.bigint() - t0) / 1e9;
+      if (elapsed < best) best = elapsed;
+    }
+
+    const cpuFraction = best / 10;
+    console.log(`  8 voices = ${(cpuFraction * 100).toFixed(2)}% of one core (best of 3)`);
+    // Spec budget is 5% of a core on desktop. Node/V8 is the proxy; the
     // authoritative on-device AudioWorklet measurement is a separate gate.
     expect(cpuFraction).toBeLessThan(0.05);
   });

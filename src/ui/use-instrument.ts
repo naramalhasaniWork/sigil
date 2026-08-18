@@ -238,14 +238,18 @@ export function useInstrument() {
   const [bouncing, setBouncing] = useState(false);
   const [lastWav, setLastWav] = useState<{ name: string; bytes: Uint8Array } | null>(null);
 
+  const BOUNCE_MS = 2600;
+
   /**
-   * Renders whatever is currently held — a chord bounces as one sample, which
-   * is the material that actually lands on a KO II pad. Offline, through our
-   * own WAV encoder, because MediaRecorder yields MP4/AAC on iOS.
+   * Renders whatever is currently held into WAV bytes without saving anything.
+   * Split out from `bounceChord` so the kit builder can put a render straight
+   * onto a pad instead of routing it through the downloads folder.
    */
-  const bounceChord = useCallback(async (name?: string): Promise<void> => {
+  const renderCurrent = useCallback(async (
+    name?: string,
+  ): Promise<{ name: string; bytes: Uint8Array; durationMs: number; sampleRate: number } | null> => {
     const params = values[engineId];
-    if (!params) return;
+    if (!params) return null;
     const notes = held.size > 0 ? [...held] : [60, 63, 67];
     setBouncing(true);
     setStatus('Rendering…');
@@ -254,32 +258,41 @@ export function useInstrument() {
         patchParams: Float32Array.from(params),
         engineId,
         midiNotes: notes,
-        durationMs: 2600,
-        releaseAtMs: 1300,
+        durationMs: BOUNCE_MS,
+        releaseAtMs: BOUNCE_MS / 2,
         targetSampleRate: KO2_SAMPLE_RATE,
       });
-      const label = name ?? `sigil-${engineId}-${notes.join('-')}`;
-      setLastWav({ name: label, bytes: result.wav });
-
-      const blob = new Blob([result.wav.slice().buffer as ArrayBuffer], { type: 'audio/wav' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${label}.wav`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      const kb = Math.round(result.wav.length / 1024);
-      setStatus(
-        `Saved ${label}.wav — ${kb}KB at ${result.sampleRate}Hz` +
-        (result.usedResample ? ' (resampled)' : ' (native KO II rate)'),
-      );
+      return {
+        name: name ?? `sigil-${engineId}-${notes.join('-')}`,
+        bytes: result.wav,
+        durationMs: BOUNCE_MS,
+        sampleRate: result.sampleRate,
+      };
     } catch (err) {
       setStatus(err instanceof Error ? `Bounce failed: ${err.message}` : 'Bounce failed');
+      return null;
     } finally {
       setBouncing(false);
     }
   }, [values, engineId, held]);
+
+  /** Renders the held chord and saves it as a file. */
+  const bounceChord = useCallback(async (name?: string): Promise<void> => {
+    const rendered = await renderCurrent(name);
+    if (!rendered) return;
+    setLastWav({ name: rendered.name, bytes: rendered.bytes });
+
+    const blob = new Blob([rendered.bytes.slice().buffer as ArrayBuffer], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${rendered.name}.wav`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    const kb = Math.round(rendered.bytes.length / 1024);
+    setStatus(`Saved ${rendered.name}.wav — ${kb}KB at ${rendered.sampleRate}Hz`);
+  }, [renderCurrent]);
 
   // ---- Sample loading ---------------------------------------------------
   const [sampleName, setSampleName] = useState<string | null>(null);
@@ -502,7 +515,7 @@ export function useInstrument() {
     layout, chooseLayout,
     held, noteOn, noteOff, panic,
     recording, toggleRecord,
-    bouncing, bounceChord, lastWav,
+    bouncing, bounceChord, renderCurrent, lastWav,
     sampleName, loadSampleFile,
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
