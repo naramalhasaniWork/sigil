@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { PhysicalEngine, MAX_MODES } from '@/dsp/physical-voice';
 import { PHYSICAL_DESCRIPTOR } from '@/dsp/physical-descriptor';
 import { magnitudeSpectrum } from '../util/fft';
+import { expectAudioOk } from '../util/assert-audio';
 
 const SR = 48000;
 const PARAMS = PHYSICAL_DESCRIPTOR.params;
@@ -85,7 +86,7 @@ describe('PHYSICAL_DESCRIPTOR', () => {
 describe('PhysicalVoice', () => {
   it('produces audible, finite output after note-on', () => {
     const out = render(() => {}, 1);
-    for (const s of out) expect(Number.isFinite(s)).toBe(true);
+    expectAudioOk(out, Infinity, 'finite output');
     const peak = peakOf(out);
     expect(peak).toBeGreaterThan(0.05);
     expect(peak).toBeLessThan(1);

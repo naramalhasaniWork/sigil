@@ -5,6 +5,8 @@ import type { EngineDescriptor } from '@/audio/types';
 import { addressOf } from '@/audio/param-space';
 import { DevicePanel } from './device-panel';
 import { MidiPanel, type MappableParam } from './midi-panel';
+import { HandControlPanel } from './hand-control-panel';
+import type { HandReading } from '@/ui/use-hand-control';
 import { useMidiMap } from '@/ui/use-midi-map';
 import type { PadChordConfig } from '@/dsp/midi-chords';
 import { KitPanel } from './kit-panel';
@@ -25,7 +27,7 @@ interface SetupPanelProps {
    * Left hand plays (pitch from height, pinch gates), right hand shapes the four
    * macros. Either may be null when only one hand is in frame.
    */
-  /** Lifted so the always-mounted camera panel knows when to show itself. */
+  onHands: (left: HandReading | null, right: HandReading | null) => void;
   section: SetupSection;
   onSection: (next: SetupSection) => void;
   macroNames: readonly [string, string, string, string];
@@ -51,7 +53,7 @@ export type SetupSection = (typeof SETUP_SECTIONS)[number];
 export function SetupPanel({
   audioContext, engineDescriptor, fxDescriptor, magicDescriptor,
   padChords, onPadChords, onParam, onNoteOn, onNoteOff, enabled,
-  macroNames, kit, colour, bouncing, onRenderForKit, section, onSection,
+  macroNames, kit, colour, bouncing, onRenderForKit, section, onSection, onHands,
 }: SetupPanelProps): JSX.Element {
   /** Every parameter a controller knob can be learned onto, across the chain. */
   const mappable = useMemo<MappableParam[]>(() => {
@@ -125,8 +127,30 @@ export function SetupPanel({
         />
       )}
 
-      {/* The camera panel is mounted by the page, not here: unmounting it would
-          stop the camera every time you changed tabs. */}
+      {/*
+        * Always mounted, parked off-screen when another section is showing.
+        * Unmounting would stop the camera on every tab change, and a hidden
+        * <video> can stop receiving frame callbacks — so it stays in the tree
+        * and simply leaves the viewport.
+        */}
+      <div
+        className={section === 'camera' ? undefined : undefined}
+        aria-hidden={section !== 'camera'}
+        style={section === 'camera' ? undefined : {
+          position: 'fixed', left: -99999, top: 0,
+          width: 360, height: 460, overflow: 'hidden', pointerEvents: 'none',
+        }}
+      >
+        <HandControlPanel
+          onHands={onHands}
+          targets={{
+            x: 'Register',
+            y: 'Pitch',
+            pinch: 'Gate',
+            spread: macroNames[3],
+          }}
+        />
+      </div>
     </div>
   );
 }

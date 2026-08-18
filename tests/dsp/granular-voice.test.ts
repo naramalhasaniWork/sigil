@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { GranularEngine } from '@/dsp/granular-voice';
 import { GRANULAR_DESCRIPTOR } from '@/dsp/granular-descriptor';
+import { expectAudioOk } from '../util/assert-audio';
 
 const SR = 48000;
 const P_DENSITY = 0;
@@ -133,10 +134,7 @@ describe('GranularVoice', () => {
         v.noteOn(880, 1, 2);
         const out = new Float32Array(8192);
         v.render(out, 0, 8192);
-        for (const s of out) {
-          expect(Number.isFinite(s), `${d.id} at ${extreme === 0 ? 'min' : 'max'}`).toBe(true);
-          expect(Math.abs(s), `${d.id} runaway level`).toBeLessThan(2);
-        }
+        expectAudioOk(out, 2, `${d.id} at ${extreme === 0 ? 'min' : 'max'}`);
       }
     }
   });
@@ -147,7 +145,7 @@ describe('GranularVoice', () => {
       v.noteOn(freq, 1, 0);
       const out = new Float32Array(4096);
       v.render(out, 0, 4096);
-      for (const s of out) expect(Number.isFinite(s), `at ${freq} Hz`).toBe(true);
+      expectAudioOk(out, Infinity, `at ${freq} Hz`);
     }
   });
 

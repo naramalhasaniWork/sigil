@@ -17,6 +17,8 @@ interface AppHeaderProps {
   onMarkDoubleClick: () => void;
   /** 'A' while hearing the snapshot, 'B' while hearing live edits. */
   snapshotState: 'A' | 'B' | null;
+  /** Live readout while the left hand is playing: note name and register. */
+  handPlaying: { note: string; register: number } | null;
   onPower: () => void;
   onToggleRecord: () => void;
   onBounce: () => void;
@@ -25,7 +27,8 @@ interface AppHeaderProps {
 
 export function AppHeader({
   engineName, sampleName, midiLabel, colour, running, recording, bouncing,
-  holdProps, onMarkDoubleClick, snapshotState, onPower, onToggleRecord, onBounce, onSampleFile,
+  holdProps, onMarkDoubleClick, snapshotState, handPlaying,
+  onPower, onToggleRecord, onBounce, onSampleFile,
 }: AppHeaderProps): JSX.Element {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -58,6 +61,15 @@ export function AppHeader({
         )}
         {midiLabel && (
           <span className="label" style={{ color: colour }}>MIDI · {midiLabel}</span>
+        )}
+        {handPlaying && (
+          <span
+            className="border-[2px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
+            style={{ borderColor: colour, color: colour }}
+          >
+            ✋ {handPlaying.note}
+            {handPlaying.register !== 0 && (handPlaying.register > 0 ? ' +8va' : ' −8va')}
+          </span>
         )}
       </div>
 

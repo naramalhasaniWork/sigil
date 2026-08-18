@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { VoiceManager } from '@/dsp/voice-manager';
 import { AnalogEngine } from '@/dsp/analog-voice';
+import { expectAudioOk } from '../util/assert-audio';
 
 const SR = 48000;
 
@@ -30,7 +31,7 @@ describe('VoiceManager', () => {
     expect(vm.activeCount).toBeLessThanOrEqual(4);
     const out = new Float32Array(512);
     vm.render(out, 512);
-    for (const s of out) expect(Number.isFinite(s)).toBe(true);
+    expectAudioOk(out, Infinity, 'finite output');
   });
 
   it('releases the matching voice on note-off', () => {

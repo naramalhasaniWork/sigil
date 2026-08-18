@@ -5,6 +5,7 @@ import {
   WAVE_SAW, WAVE_PULSE, WAVE_TRIANGLE, WAVE_SINE,
 } from '@/dsp/lfo';
 import { magnitudeSpectrum } from '../util/fft';
+import { expectAudioOk } from '../util/assert-audio';
 
 const SR = 48000;
 
@@ -28,10 +29,9 @@ describe('Lfo', () => {
   it('keeps every shape inside -1..1', () => {
     for (let shape = 0; shape < LFO_SHAPE_COUNT; shape++) {
       const v = run(make(shape, 7), 40000);
-      for (const x of v) {
-        expect(Number.isFinite(x), `shape ${shape}`).toBe(true);
-        expect(Math.abs(x), `shape ${shape}`).toBeLessThanOrEqual(1 + 1e-9);
-      }
+      // Scan then assert once: 5 shapes x 40,000 samples x 2 assertions was
+      // 400,000 expect() calls and over eight seconds for one test.
+      expectAudioOk(v instanceof Float32Array ? v : Float32Array.from(v), 1 + 1e-9, `shape ${shape}`);
     }
   });
 

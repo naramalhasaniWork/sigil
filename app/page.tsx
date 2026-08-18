@@ -13,10 +13,10 @@ import { useDragExport } from '@/ui/use-drag-export';
 import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
 import { useChordInput } from '@/ui/use-chord-input';
 import { SetupPanel, type SetupSection } from '@/ui/components/setup-panel';
-import { HandControlPanel } from '@/ui/components/hand-control-panel';
 import { useKit } from '@/ui/use-kit';
 import { useHandPlay } from '@/ui/use-hand-play';
 import { useSecrets } from '@/ui/use-secrets';
+import { noteName } from '@/dsp/chords';
 import type { HandReading } from '@/ui/use-hand-control';
 import { DEFAULT_PAD_CHORDS } from '@/dsp/midi-chords';
 import { MacroRow } from '@/ui/components/macro-row';
@@ -163,6 +163,11 @@ export default function Page(): JSX.Element {
         holdProps={eggs.holdProps as unknown as Record<string, unknown>}
         onMarkDoubleClick={secrets.toggleAB}
         snapshotState={secrets.hasSnapshot ? (secrets.onSnapshot ? 'A' : 'B') : null}
+        handPlaying={
+          handPlay.current === null
+            ? null
+            : { note: noteName(handPlay.current), register: handPlay.register }
+        }
         onPower={(): void => { void inst.start(); }}
         onToggleRecord={(): void => { void inst.toggleRecord(); }}
         onBounce={(): void => { void inst.bounceChord(); }}
@@ -271,7 +276,15 @@ export default function Page(): JSX.Element {
               </div>
             )}
 
-            {view === 'setup' && (
+            {/* Mounted always, parked off-screen when elsewhere, so the camera
+                and its stream survive tab changes. */}
+            <div
+              aria-hidden={view !== 'setup'}
+              style={view === 'setup' ? undefined : {
+                position: 'fixed', left: -99999, top: 0,
+                width: 900, height: 700, overflow: 'hidden', pointerEvents: 'none',
+              }}
+            >
               <SetupPanel
                 audioContext={inst.host?.context ?? null}
                 engineDescriptor={inst.descriptor}
@@ -294,8 +307,9 @@ export default function Page(): JSX.Element {
                 colour={colour}
                 bouncing={inst.bouncing}
                 onRenderForKit={inst.renderCurrent}
+                onHands={onHands}
               />
-            )}
+            </div>
 
             {view === 'export' && (
               <ExportTray
@@ -426,35 +440,6 @@ export default function Page(): JSX.Element {
         )}
 
       </footer>
-
-      {/*
-        * Mounted for the whole session and merely HIDDEN when you are elsewhere.
-        * Unmounting it would tear down the camera stream and the tracking loop,
-        * so hand tracking now stays on until you turn it off.
-        */}
-      <div
-        className={showCamera ? 'px-4 pb-6' : undefined}
-        aria-hidden={!showCamera}
-        /*
-         * Parked off-screen rather than display:none. A hidden <video> can stop
-         * receiving frame callbacks, which would silently pause tracking while
-         * looking like it was still on — worse than stopping it outright.
-         */
-        style={showCamera ? undefined : {
-          position: 'fixed', left: -99999, top: 0,
-          width: 360, height: 420, overflow: 'hidden', pointerEvents: 'none',
-        }}
-      >
-        <HandControlPanel
-          onHands={onHands}
-          targets={{
-            x: inst.macroNames[1],
-            y: inst.macroNames[0],
-            pinch: inst.macroNames[2],
-            spread: inst.macroNames[3],
-          }}
-        />
-      </div>
 
       <ToastHost message={inst.status} colour={colour} />
       <CreditsPanel open={eggs.credits} onClose={eggs.closeCredits} />

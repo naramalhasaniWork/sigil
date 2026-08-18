@@ -16,6 +16,14 @@ export default defineConfig({
      * determinism is worth more than the parallelism.
      */
     fileParallelism: false,
+    /*
+     * DSP sweeps are legitimately heavy: rendering seconds of audio across every
+     * parameter at both extremes is real compute, not a hang. The 5s default is
+     * a web-app default and it was failing honest tests at random depending on
+     * machine load. Assertion-per-sample loops are being removed separately —
+     * that was the other half of the problem.
+     */
+    testTimeout: 30_000,
   },
   resolve: { alias: { '@': resolve(import.meta.dirname, './src') } },
 });

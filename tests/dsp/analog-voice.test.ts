@@ -3,6 +3,7 @@ import { AnalogEngine } from '@/dsp/analog-voice';
 import { ANALOG_DESCRIPTOR } from '@/dsp/analog-descriptor';
 import { denormalise, makeRng } from '@/dsp/mutation';
 import { magnitudeSpectrum } from '../util/fft';
+import { expectAudioOk } from '../util/assert-audio';
 
 const SR = 48000;
 const PARAMS = ANALOG_DESCRIPTOR.params;
@@ -75,7 +76,7 @@ describe('AnalogVoice', () => {
     v.noteOn(220, 1, 0);
     const out = new Float32Array(4800);
     v.render(out, 0, 4800);
-    for (const s of out) expect(Number.isFinite(s)).toBe(true);
+    expectAudioOk(out, Infinity, 'finite output');
     expect(peak(out)).toBeGreaterThan(0.05);
     expect(peak(out)).toBeLessThan(2);
   });
@@ -153,10 +154,7 @@ describe('AnalogVoice', () => {
         v.noteOn(880, 1, 0);
         const out = new Float32Array(4096);
         v.render(out, 0, 4096);
-        for (const s of out) {
-          expect(Number.isFinite(s), `${d.id} at ${extreme === 0 ? 'min' : 'max'}`).toBe(true);
-          expect(Math.abs(s), `${d.id} bounded`).toBeLessThan(4.1);
-        }
+        expectAudioOk(out, 4.1, `${d.id} at ${extreme === 0 ? 'min' : 'max'}`);
       }
     }
   });
@@ -174,10 +172,7 @@ describe('AnalogVoice', () => {
       v.render(out, 0, 2048);
       v.noteOff();
       v.render(out, 0, 2048);
-      for (const s of out) {
-        expect(Number.isFinite(s), `trial ${trial}`).toBe(true);
-        expect(Math.abs(s), `trial ${trial}`).toBeLessThan(4.1);
-      }
+      expectAudioOk(out, 4.1, `trial ${trial}`);
     }
   });
 
