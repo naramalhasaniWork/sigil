@@ -15,18 +15,38 @@ export interface KeyboardOptions {
  * tracker. Codes are used rather than `key` so the layout stays in the same
  * physical place on AZERTY, QWERTZ, Dvorak and friends.
  */
-const SEMITONE_BY_CODE = new Map<string, number>([
-  ['KeyZ', 0], ['KeyS', 1], ['KeyX', 2], ['KeyD', 3], ['KeyC', 4], ['KeyV', 5],
-  ['KeyG', 6], ['KeyB', 7], ['KeyH', 8], ['KeyN', 9], ['KeyJ', 10], ['KeyM', 11],
+/**
+ * Two full octaves across the two letter rows, laid out like a piano.
+ *
+ * White keys run along the home row and the QWERTY row; the black keys sit
+ * physically above them, with the gaps — no key above E or B — falling where
+ * the gaps fall on a keyboard. Digits 4 and 8 are skipped for exactly that
+ * reason, and so are the positions above E and B on the lower row. That is what
+ * makes the shape learnable: your fingers are reading a piano, not a list.
+ *
+ * The two rows overlap by an octave, which is the tracker convention: the upper
+ * row starts where the lower row's octave ends, so you can play across the seam
+ * with both hands rather than reaching for the octave control mid-phrase.
+ *
+ * Comma and Period used to shift octave. They are notes now — `[` and `]` do
+ * octave, they are in the shortcut table, and they are what the help panel
+ * documents. Spending two keys in the middle of a playable row on a duplicate
+ * binding was the wrong trade.
+ */
+export const SEMITONE_BY_CODE = new Map<string, number>([
+  // Lower row — one octave from C.
+  ['KeyZ', 0], ['KeyS', 1], ['KeyX', 2], ['KeyD', 3], ['KeyC', 4],
+  ['KeyV', 5], ['KeyG', 6], ['KeyB', 7], ['KeyH', 8], ['KeyN', 9],
+  ['KeyJ', 10], ['KeyM', 11],
+  ['Comma', 12], ['KeyL', 13], ['Period', 14], ['Semicolon', 15], ['Slash', 16],
+
+  // Upper row — the octave above, overlapping at the seam.
   ['KeyQ', 12], ['Digit2', 13], ['KeyW', 14], ['Digit3', 15], ['KeyE', 16],
   ['KeyR', 17], ['Digit5', 18], ['KeyT', 19], ['Digit6', 20], ['KeyY', 21],
-  ['Digit7', 22], ['KeyU', 23], ['KeyI', 24],
+  ['Digit7', 22], ['KeyU', 23], ['KeyI', 24], ['Digit9', 25], ['KeyO', 26],
+  ['Digit0', 27], ['KeyP', 28],
 ]);
 
-const OCTAVE_DOWN = 'Comma';
-const OCTAVE_UP = 'Period';
-const MIN_SHIFT = -3;
-const MAX_SHIFT = 3;
 const MIN_MIDI = 0;
 const MAX_MIDI = 127;
 
@@ -48,12 +68,11 @@ export function useComputerKeyboard(opts: KeyboardOptions): { held: ReadonlySet<
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  // code -> midi note issued for that key press (so octave shifts mid-hold
+  // code -> midi note issued for that key press (so an octave change mid-hold
   // still release the note that actually started).
   const downCodes = useRef(new Map<string, number>());
   // midi -> how many physical keys are holding it.
   const counts = useRef(new Map<number, number>());
-  const shift = useRef(0);
 
   useEffect(() => {
     const codes = downCodes.current;
@@ -102,19 +121,12 @@ export function useComputerKeyboard(opts: KeyboardOptions): { held: ReadonlySet<
       if (!optsRef.current.enabled) return;
       if (isTypingTarget(e.target)) return;
 
-      if (e.code === OCTAVE_DOWN || e.code === OCTAVE_UP) {
-        const delta = e.code === OCTAVE_UP ? 1 : -1;
-        shift.current = Math.max(MIN_SHIFT, Math.min(MAX_SHIFT, shift.current + delta));
-        e.preventDefault();
-        return;
-      }
-
       const semitone = SEMITONE_BY_CODE.get(e.code);
       if (semitone === undefined) return;
       e.preventDefault();
       if (codes.has(e.code)) return;
 
-      const midi = 12 * (optsRef.current.octave + shift.current) + semitone;
+      const midi = 12 * optsRef.current.octave + semitone;
       if (midi < MIN_MIDI || midi > MAX_MIDI) return;
       codes.set(e.code, midi);
       press(midi);

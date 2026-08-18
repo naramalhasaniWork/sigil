@@ -1040,7 +1040,7 @@ var LOG2_REF = 8.03125;
 var CONTROL_STEP = 8;
 var MAX_UNISON = 4;
 var OSC_GAIN = 0.8;
-var VOICE_GAIN = 0.35;
+var VOICE_GAIN = 0.55;
 function saturate2(x) {
   const x2 = x * x;
   return x * (27 + x2) / (27 + 9 * x2);
@@ -2952,7 +2952,7 @@ var DEFAULT_ROOT = 261.6255653;
 var EDGE_FADE = 96;
 var INV_EDGE_FADE = 1 / EDGE_FADE;
 var MIN_LOOP = 32;
-var VOICE_GAIN2 = 0.85;
+var VOICE_GAIN2 = 0.7;
 var activeData = null;
 var activeSr = DEFAULT_SR;
 var activeRoot = DEFAULT_ROOT;
@@ -3402,7 +3402,7 @@ var TWO_PI6 = 6.283185307179586;
 var LOG2_REF2 = 8.03125;
 var CONTROL_STEP3 = 8;
 var OSC_GAIN2 = 0.9;
-var VOICE_GAIN3 = 0.35;
+var VOICE_GAIN3 = 0.55;
 var TABLE_COUNT = 8;
 var TABLE_SIZE = 2048;
 var STRIDE = TABLE_SIZE + 1;
@@ -3945,6 +3945,16 @@ function sat(x) {
   const c = x > 3 ? 3 : x < -3 ? -3 : x, c2 = c * c;
   return c * (27 + c2) / (27 + 9 * c2);
 }
+var LIMIT_KNEE = 1;
+var LIMIT_CEIL = 1.5;
+function limitOut(x) {
+  const a = x < 0 ? -x : x;
+  if (a <= LIMIT_KNEE) return x;
+  const span = LIMIT_CEIL - LIMIT_KNEE;
+  const u = (a - LIMIT_KNEE) / span;
+  const bent = LIMIT_KNEE + span * (u / (1 + u));
+  return x < 0 ? -bent : bent;
+}
 function lfo(p) {
   const t = p * 2 - 1;
   return 4 * t * (t < 0 ? 1 + t : 1 - t);
@@ -4282,7 +4292,7 @@ var DRIVE_REF = 0.35;
 var DRIVE_MAX_G = 24;
 var TILT_HZ = 900;
 var TILT_AMOUNT = 0.9;
-var LIMIT = 1.5;
+var CRUSH_TRANSPARENT = 32768;
 var SILENT = 1e-4;
 var FxChain = class {
   wasChorus = false;
@@ -4390,12 +4400,14 @@ var FxChain = class {
       const w = sat(shaped * g) * DRIVE_REF / sat(DRIVE_REF * g);
       x = dry + (w - dry) * (amt * (2 - amt));
     }
-    this.acc += v[P_CRUSH_RATE];
+    const rate = v[P_CRUSH_RATE];
+    this.acc += rate;
     if (this.acc >= 1) {
       this.acc -= 1;
       this.held = x;
     }
     const half = v[P_CRUSH_BITS];
+    if (rate >= 1 && half >= CRUSH_TRANSPARENT) return this.held;
     return Math.floor(this.held * half + 0.5) / half;
   }
   process(buffer, count) {
@@ -4408,7 +4420,7 @@ var FxChain = class {
       if (onChorus) x = this.chorus.process(x, v);
       if (onDelay) x = this.delay.process(x, v);
       if (onReverb) x = this.reverb.process(x, v);
-      x = sat(x * v[P_TRIM] / LIMIT) * LIMIT;
+      x = limitOut(x * v[P_TRIM]);
       buffer[n] = x === x ? x : 0;
     }
   }
@@ -4443,9 +4455,9 @@ var FxChain = class {
         l = rv.oL;
         r = rv.oR;
       }
-      const trim = v[P_TRIM] / LIMIT;
-      l = sat(l * trim) * LIMIT;
-      r = sat(r * trim) * LIMIT;
+      const trim = v[P_TRIM];
+      l = limitOut(l * trim);
+      r = limitOut(r * trim);
       left[n] = l === l ? l : 0;
       right[n] = r === r ? r : 0;
     }

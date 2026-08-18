@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SHORTCUTS, parseKeys } from '@/ui/shortcuts';
 import { buildCommands, shortcutHandlers, type SigilActions } from '@/ui/sigil-commands';
+import { SEMITONE_BY_CODE } from '@/ui/use-computer-keyboard';
 
 /**
  * SIGIL shipped a complete shortcut registry, a help overlay and a command
@@ -204,5 +205,47 @@ describe('avoids combos the browser owns', () => {
       .filter((s) => OWNED.some((o) => s.keys === o || s.keys === o.replace('alt+', 'alt+shift+')))
       .map((s) => `${s.id} (${s.keys})`);
     expect(clashes).toEqual([]);
+  });
+});
+
+/*
+ * The computer keyboard is laid out like a piano, and the shape is what makes
+ * it learnable — your fingers read an instrument rather than a lookup table.
+ * These pin the shape so an edit cannot quietly break it.
+ */
+describe('computer keyboard layout', () => {
+  it('puts the white keys of the lower row in order', () => {
+    // Z X C V B N M , . /  ->  C D E F G A B C D E
+    const white = ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma', 'Period', 'Slash'];
+    const expected = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16];
+    white.forEach((code, i) => expect(SEMITONE_BY_CODE.get(code)).toBe(expected[i]));
+  });
+
+  it('puts the white keys of the upper row an octave above', () => {
+    const white = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP'];
+    const expected = [12, 14, 16, 17, 19, 21, 23, 24, 26, 28];
+    white.forEach((code, i) => expect(SEMITONE_BY_CODE.get(code)).toBe(expected[i]));
+  });
+
+  /*
+   * A piano has no black key between E-F or B-C. Digits 4 and 8 sit at exactly
+   * those gaps, so binding them would put a note where a player's eye sees a
+   * space — the one thing that makes the layout stop feeling like a keyboard.
+   */
+  it('leaves the gaps where a piano has no black key', () => {
+    expect(SEMITONE_BY_CODE.has('Digit4')).toBe(false);
+    expect(SEMITONE_BY_CODE.has('Digit8')).toBe(false);
+    expect(SEMITONE_BY_CODE.has('Digit1')).toBe(false);
+  });
+
+  it('spans more than two octaves', () => {
+    const values = [...SEMITONE_BY_CODE.values()];
+    expect(Math.max(...values) - Math.min(...values)).toBeGreaterThanOrEqual(24);
+  });
+
+  /* The rows overlap by an octave so a phrase can cross the seam with both
+   * hands instead of reaching for the octave control. */
+  it('starts the upper row where the lower row ends', () => {
+    expect(SEMITONE_BY_CODE.get('KeyQ')).toBe(SEMITONE_BY_CODE.get('Comma'));
   });
 });
