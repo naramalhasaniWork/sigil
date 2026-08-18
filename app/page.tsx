@@ -8,6 +8,7 @@ import { useMidi } from '@/ui/use-midi';
 import { EngineRail } from '@/ui/components/engine-rail';
 import { AppHeader } from '@/ui/components/app-header';
 import { ToastHost } from '@/ui/components/toast';
+import { InstallPrompt } from '@/ui/components/install-prompt';
 import { ExportTray } from '@/ui/components/export-tray';
 import { useDragExport } from '@/ui/use-drag-export';
 import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
@@ -453,6 +454,7 @@ export default function Page(): JSX.Element {
 
       </footer>
 
+      <InstallPrompt colour={colour} />
       <ToastHost message={inst.status} colour={colour} />
       <CreditsPanel open={eggs.credits} onClose={eggs.closeCredits} />
     </main>
