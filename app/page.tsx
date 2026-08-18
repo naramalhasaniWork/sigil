@@ -91,7 +91,7 @@ export default function Page(): JSX.Element {
   const colour = inst.descriptor?.colour ?? '#FF6B6B';
   const tray = useDragExport();
   const kit = useKit();
-  const [setupSection, setSetupSection] = useState<SetupSection>('kit');
+  const [setupSection, setSetupSection] = useState<SetupSection>('camera');
   const showCamera = view === 'setup' && setupSection === 'camera';
 
   const engineDefaults = useMemo(() => {
@@ -279,8 +279,14 @@ export default function Page(): JSX.Element {
     undo: history.undo,
     redo: history.redo,
     toggleHunt: (): void => showTab(view === 'hunt' ? 'sculpt' : 'hunt'),
-    reroll: (): void => { inst.reroll(); showTab('hunt'); },
-    breed: (): void => { inst.breedKept(); showTab('hunt'); },
+    /*
+     * Re-roll and breed do NOT change tab. They used to jump you to Hunt, which
+     * meant a shortcut pressed while shaping a sound threw away the view you
+     * had chosen. You stay where you put yourself; alt+H is there when you
+     * actually want to look at Hunt.
+     */
+    reroll: (): void => inst.reroll(),
+    breed: (): void => inst.breedKept(),
     assignPad: (): void => {
       const free = kit.kit.slots.find((slot) => slot.wav === null);
       if (free === undefined) {

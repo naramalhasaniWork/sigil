@@ -48,7 +48,15 @@ interface SetupPanelProps {
  * choice than the instrument needs — the things in here are all "set something
  * up once", so they share one door and one row of sub-tabs.
  */
-export const SETUP_SECTIONS = ['kit', 'hardware', 'controllers', 'camera'] as const;
+/*
+ * Camera first, KO II last.
+ *
+ * Ordered by how often the owner actually reaches for them. Hand tracking is
+ * the thing he opens Setup to use; the KO II kit builder is the tail end of a
+ * session, after the sounds already exist, and it was sitting in the first slot
+ * collecting accidental taps.
+ */
+export const SETUP_SECTIONS = ['camera', 'hardware', 'controllers', 'kit'] as const;
 export type SetupSection = (typeof SETUP_SECTIONS)[number];
 
 /**

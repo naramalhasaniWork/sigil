@@ -95,8 +95,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'hunt.toggle', keys: 'alt+h', label: 'Open / close Hunt', group: 'Hunt' },
   // Also no `when`: both open Hunt on their way, so pressing F from anywhere
   // lands you in front of the six things it just made.
-  { id: 'hunt.reroll', keys: 'alt+f', label: 'Re-roll six variations', group: 'Hunt' },
-  { id: 'hunt.breed', keys: 'alt+shift+f', label: 'Breed kept variations', group: 'Hunt' },
+  { id: 'hunt.reroll', keys: 'alt+g', label: 'Re-roll six variations', group: 'Hunt' },
+  { id: 'hunt.breed', keys: 'alt+shift+g', label: 'Breed kept variations', group: 'Hunt' },
 
   // ── Kit ──────────────────────────────────────────────────────────────────
   { id: 'kit.assign', keys: 'alt+k', label: 'Assign patch to next free pad', group: 'Kit' },
@@ -104,8 +104,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
 
   // ── View ─────────────────────────────────────────────────────────────────
   { id: 'view.palette', keys: 'mod+k', label: 'Command palette', group: 'View' },
-  { id: 'view.deep', keys: 'alt+a', label: 'Deep view — every parameter', group: 'View' },
-  { id: 'view.sculpt', keys: 'alt+o', label: 'Sculpt view — macros, scope & spectrum', group: 'View' },
+  { id: 'view.deep', keys: 'alt+v', label: 'Deep view — every parameter', group: 'View' },
+  { id: 'view.sculpt', keys: 'alt+s', label: 'Sculpt view — macros, scope & spectrum', group: 'View' },
   { id: 'view.layout', keys: 'alt+l', label: 'Play surface — keys / pads', group: 'View' },
 
   // ── Help ─────────────────────────────────────────────────────────────────

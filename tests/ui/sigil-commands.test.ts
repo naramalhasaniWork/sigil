@@ -189,3 +189,20 @@ describe('no shortcut is a bare letter', () => {
     expect(shiftOnly).toEqual([]);
   });
 });
+
+/*
+ * The header of shortcuts.ts states that alt+D, alt+E and alt+F are avoided
+ * because Windows browsers own them — alt+D focuses the address bar and alt+F
+ * opens the File menu. That rule was stated in a comment and then broken twice.
+ * A comment is not a guard.
+ */
+describe('avoids combos the browser owns', () => {
+  const OWNED = ['alt+d', 'alt+e', 'alt+f'];
+
+  it('binds nothing to alt+D, alt+E or alt+F', () => {
+    const clashes = SHORTCUTS
+      .filter((s) => OWNED.some((o) => s.keys === o || s.keys === o.replace('alt+', 'alt+shift+')))
+      .map((s) => `${s.id} (${s.keys})`);
+    expect(clashes).toEqual([]);
+  });
+});
