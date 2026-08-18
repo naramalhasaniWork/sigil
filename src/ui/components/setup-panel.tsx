@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
 import { addressOf } from '@/audio/param-space';
 import { DevicePanel } from './device-panel';
@@ -8,6 +8,8 @@ import { HandControlPanel } from './hand-control-panel';
 import { MidiPanel, type MappableParam } from './midi-panel';
 import { useMidiMap } from '@/ui/use-midi-map';
 import type { PadChordConfig } from '@/dsp/midi-chords';
+import { KitPanel } from './kit-panel';
+import type { KitHandle } from '@/ui/use-kit';
 
 interface SetupPanelProps {
   audioContext: AudioContext | null;
@@ -23,7 +25,19 @@ interface SetupPanelProps {
   /** Hand signals are modulation sources, patched onto the four macros. */
   onHandReading: (x: number, y: number, pinch: number, spread: number) => void;
   macroNames: readonly [string, string, string, string];
+  kit: KitHandle;
+  colour: string;
+  bouncing: boolean;
+  onRenderForKit: () => Promise<{ name: string; bytes: Uint8Array; durationMs: number } | null>;
 }
+
+/**
+ * Kit sits here rather than at the top level. Seven top-level tabs was more
+ * choice than the instrument needs — the things in here are all "set something
+ * up once", so they share one door and one row of sub-tabs.
+ */
+const SECTIONS = ['kit', 'hardware', 'controllers', 'camera'] as const;
+type Section = (typeof SECTIONS)[number];
 
 /**
  * Everything about talking to the outside world: hardware, controllers and the
@@ -33,8 +47,9 @@ interface SetupPanelProps {
 export function SetupPanel({
   audioContext, engineDescriptor, fxDescriptor, magicDescriptor,
   padChords, onPadChords, onParam, onNoteOn, onNoteOff, enabled,
-  onHandReading, macroNames,
+  onHandReading, macroNames, kit, colour, bouncing, onRenderForKit,
 }: SetupPanelProps): JSX.Element {
+  const [section, setSection] = useState<Section>('kit');
   /** Every parameter a controller knob can be learned onto, across the chain. */
   const mappable = useMemo<MappableParam[]>(() => {
     const out: MappableParam[] = [];
@@ -63,14 +78,36 @@ export function SetupPanel({
   });
 
   return (
-    <div className="flex flex-col gap-8 max-w-5xl">
-      <section>
-        <div className="label mb-3">Hardware</div>
-        <DevicePanel audioContext={audioContext} />
-      </section>
+    <div className="flex flex-col gap-5 max-w-5xl">
+      <div className="flex flex-wrap gap-1.5">
+        {SECTIONS.map((name) => {
+          const active = section === name;
+          return (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={active}
+              onClick={(): void => setSection(name)}
+              className="border-[3px] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
+              style={{
+                borderColor: active ? colour : 'var(--muted)',
+                background: active ? colour : 'transparent',
+                color: active ? 'var(--bg)' : 'var(--ink)',
+              }}
+            >
+              {name === 'kit' ? 'Kit · KO II' : name}
+            </button>
+          );
+        })}
+      </div>
 
-      <section>
-        <div className="label mb-3">Controllers</div>
+      {section === 'kit' && (
+        <KitPanel kit={kit} colour={colour} busy={bouncing} onRender={onRenderForKit} />
+      )}
+
+      {section === 'hardware' && <DevicePanel audioContext={audioContext} />}
+
+      {section === 'controllers' && (
         <MidiPanel
           devices={midiMap.devices}
           lastActivity={midiMap.lastActivity}
@@ -83,10 +120,9 @@ export function SetupPanel({
           padChords={padChords}
           onPadChords={onPadChords}
         />
-      </section>
+      )}
 
-      <section>
-        <div className="label mb-3">Camera gesture</div>
+      {section === 'camera' && (
         <HandControlPanel
           onReading={onHandReading}
           targets={{
@@ -96,7 +132,7 @@ export function SetupPanel({
             spread: macroNames[3],
           }}
         />
-      </section>
+      )}
     </div>
   );
 }

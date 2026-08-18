@@ -13,7 +13,6 @@ import { useDragExport } from '@/ui/use-drag-export';
 import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
 import { useChordInput } from '@/ui/use-chord-input';
 import { SetupPanel } from '@/ui/components/setup-panel';
-import { KitPanel } from '@/ui/components/kit-panel';
 import { useKit } from '@/ui/use-kit';
 import { DEFAULT_PAD_CHORDS } from '@/dsp/midi-chords';
 import { MacroRow } from '@/ui/components/macro-row';
@@ -27,7 +26,7 @@ import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
 
-type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'kit' | 'export' | 'setup';
+type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export' | 'setup';
 
 export default function Page(): JSX.Element {
   const inst = useInstrument();
@@ -142,7 +141,7 @@ export default function Page(): JSX.Element {
 
         <section className="flex-1 min-w-0 flex flex-col">
           <div className="flex border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
-            {(['sculpt', 'deep', 'fx', 'hunt', 'kit', 'export', 'setup'] as const).map((v) => (
+            {(['sculpt', 'deep', 'fx', 'hunt', 'export', 'setup'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -224,15 +223,6 @@ export default function Page(): JSX.Element {
               </div>
             )}
 
-            {view === 'kit' && (
-              <KitPanel
-                kit={kit}
-                colour={colour}
-                busy={inst.bouncing}
-                onRender={inst.renderCurrent}
-              />
-            )}
-
             {view === 'setup' && (
               <SetupPanel
                 audioContext={inst.host?.context ?? null}
@@ -256,6 +246,10 @@ export default function Page(): JSX.Element {
                   inst.setMacro(3, spread);
                 }}
                 macroNames={inst.macroNames}
+                kit={kit}
+                colour={colour}
+                bouncing={inst.bouncing}
+                onRenderForKit={inst.renderCurrent}
               />
             )}
 
