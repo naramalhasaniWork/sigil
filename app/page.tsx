@@ -12,6 +12,7 @@ import { ExportTray } from '@/ui/components/export-tray';
 import { useDragExport } from '@/ui/use-drag-export';
 import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
 import { useChordInput } from '@/ui/use-chord-input';
+import { SetupPanel } from '@/ui/components/setup-panel';
 import { DEFAULT_PAD_CHORDS } from '@/dsp/midi-chords';
 import { MacroRow } from '@/ui/components/macro-row';
 import { XYPad } from '@/ui/components/xy-pad';
@@ -24,7 +25,7 @@ import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
 
-type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export';
+type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export' | 'setup';
 
 export default function Page(): JSX.Element {
   const inst = useInstrument();
@@ -138,7 +139,7 @@ export default function Page(): JSX.Element {
 
         <section className="flex-1 min-w-0 flex flex-col">
           <div className="flex border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
-            {(['sculpt', 'deep', 'fx', 'hunt', 'export'] as const).map((v) => (
+            {(['sculpt', 'deep', 'fx', 'hunt', 'export', 'setup'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -218,6 +219,32 @@ export default function Page(): JSX.Element {
                   />
                 </div>
               </div>
+            )}
+
+            {view === 'setup' && (
+              <SetupPanel
+                audioContext={inst.host?.context ?? null}
+                engineDescriptor={inst.descriptor}
+                fxDescriptor={inst.fxDescriptor}
+                magicDescriptor={inst.magicDescriptor}
+                padChords={chordConfig}
+                onPadChords={(next): void => {
+                  scaleState.setMode(next.mode === 'off' ? 'notes' : 'chords');
+                  scaleState.setRoot(((next.root % 12) + 12) % 12);
+                  scaleState.setScale(next.scale);
+                }}
+                onParam={(address, value): void => inst.setParamByAddress(address, value)}
+                onNoteOn={chordInput.noteOn}
+                onNoteOff={chordInput.noteOff}
+                enabled={inst.started}
+                onHandReading={(x, y, pinch, spread): void => {
+                  inst.setMacro(1, x);
+                  inst.setMacro(0, y);
+                  inst.setMacro(2, pinch);
+                  inst.setMacro(3, spread);
+                }}
+                macroNames={inst.macroNames}
+              />
             )}
 
             {view === 'export' && (

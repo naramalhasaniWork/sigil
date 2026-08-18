@@ -5137,10 +5137,20 @@ var SigilProcessor = class extends AudioWorkletProcessor {
   active;
   fx;
   magic;
+  /**
+   * Capture buffer, preallocated so process() never allocates. 60 seconds is a
+   * deliberate ceiling: at 48kHz this is ~11.5MB resident, which is fine on a
+   * desktop and still safe on a phone. Recording stops itself at the limit and
+   * says so rather than silently truncating.
+   */
+  captureBuf;
+  capturing = false;
+  captureLen = 0;
   constructor(options) {
     super(options);
     this.fx = new FxChain(sampleRate);
     this.magic = new MagicChain(sampleRate);
+    this.captureBuf = new Float32Array(Math.floor(sampleRate * 60));
     for (const engine of ENGINES) {
       this.managers.set(engine.descriptor.id, new VoiceManager(engine, sampleRate, 16));
     }
@@ -5211,12 +5221,30 @@ var SigilProcessor = class extends AudioWorkletProcessor {
         case "loadSample":
           setActiveSample(msg.data, msg.sampleRate, msg.rootHz);
           break;
+        case "recordStart":
+          this.captureLen = 0;
+          this.capturing = true;
+          break;
+        case "recordStop":
+          this.finishCapture(false);
+          break;
       }
     };
   }
   releaseAtSample = -1;
   bounceNotes = [];
   samplesRendered = 0;
+  /** Hands the captured audio back. The one allocation here happens on stop. */
+  finishCapture(hitLimit) {
+    if (!this.capturing) return;
+    this.capturing = false;
+    const data = this.captureBuf.slice(0, this.captureLen);
+    this.port.postMessage(
+      { type: "recording", data, sampleRate, frames: this.captureLen, hitLimit },
+      [data.buffer]
+    );
+    this.captureLen = 0;
+  }
   process(_inputs, outputs) {
     const output = outputs[0];
     if (!output) return true;
@@ -5232,6 +5260,15 @@ var SigilProcessor = class extends AudioWorkletProcessor {
         for (const n of this.bounceNotes) this.active.noteOff(n);
         this.bounceNotes.length = 0;
       }
+    }
+    if (this.capturing) {
+      const room = this.captureBuf.length - this.captureLen;
+      const n = left.length < room ? left.length : room;
+      for (let i = 0; i < n; i++) {
+        this.captureBuf[this.captureLen + i] = left[i];
+      }
+      this.captureLen += n;
+      if (this.captureLen >= this.captureBuf.length) this.finishCapture(true);
     }
     for (let ch = 1; ch < output.length; ch++) {
       output[ch]?.set(left);

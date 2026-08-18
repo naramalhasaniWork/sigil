@@ -6,8 +6,9 @@ import { EngineHost } from '@/audio/engine-host';
 import { bouncePatch } from '@/audio/bounce';
 import { FX_DESCRIPTOR } from '@/dsp/fx-descriptor';
 import { FX_MAGIC_DESCRIPTOR } from '@/dsp/fx-magic-descriptor';
-import { addressOf } from '@/audio/param-space';
+import { addressOf, sectionOf } from '@/audio/param-space';
 import { decodeAudioFile, toMono, normaliseSample, detectPitchHz } from '@/audio/sample-store';
+import { encodeWav16, trimToZeroCrossings, normalisePeak } from '@/audio/wav';
 import { KO2_SAMPLE_RATE } from '@/audio/wav';
 import { ENGINES, DEFAULT_ENGINE_ID } from '@/dsp/registry';
 import { PRESETS, presetToValues } from '@/dsp/presets';
@@ -155,6 +156,18 @@ export function useInstrument() {
     hostRef.current?.setAllParams(next);
   }, [engineId]);
 
+  /**
+   * Sets a parameter by its flat address, routing to the right chain. MIDI learn
+   * and any other address-based source uses this rather than needing to know
+   * which chain a knob belongs to.
+   */
+  const setParamByAddress = useCallback((address: number, value: number): void => {
+    const { section, index } = sectionOf(address);
+    if (section === 'fx') setFxParam(index, value);
+    else if (section === 'magic') setMagicParam(index, value);
+    else setParam(index, value);
+  }, [setFxParam, setMagicParam, setParam]);
+
   const noteOn = useCallback((midi: number, velocity = 1): void => {
     hostRef.current?.noteOn(midi, velocity);
     setHeld((prev) => new Set(prev).add(midi));
@@ -174,25 +187,52 @@ export function useInstrument() {
     setHeld(new Set());
   }, []);
 
+  /**
+   * Start/stop a performance recording and hand back a real WAV. The worklet
+   * captures its own output, so the file is exactly what was heard — the old
+   * MediaRecorder path could only ever emit WebM or MP4.
+   */
   const toggleRecord = useCallback(async (): Promise<void> => {
     const host = hostRef.current;
-    if (!host) return;
-    if (host.isRecording) {
-      const blob = await host.stopRecording();
-      setRecording(false);
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sigil-take-${Date.now()}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setStatus('Take saved. On iPhone this is MP4/AAC — use Bounce for true WAV.');
-      }
+    if (!host) {
+      setStatus('Hit Power first.');
       return;
     }
-    if (host.startRecording()) setRecording(true);
-  }, []);
+
+    if (host.isRecording) {
+      const result = await host.stopCapture();
+      setRecording(false);
+      if (!result || result.data.length === 0) {
+        setStatus('Nothing was captured.');
+        return;
+      }
+      const trimmed = normalisePeak(trimToZeroCrossings(result.data), 0.95);
+      const wav = encodeWav16([trimmed], result.sampleRate);
+      const seconds = trimmed.length / result.sampleRate;
+      const name = `sigil-take-${engineId}-${seconds.toFixed(1)}s`;
+      setLastWav({ name, bytes: wav });
+
+      const blob = new Blob([wav.slice().buffer as ArrayBuffer], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${name}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus(
+        result.hitLimit
+          ? `Stopped at the 60s limit — saved ${seconds.toFixed(1)}s WAV`
+          : `Saved ${seconds.toFixed(1)}s WAV at ${result.sampleRate}Hz`,
+      );
+      return;
+    }
+
+    if (host.startCapture()) {
+      setRecording(true);
+      setStatus('Recording — play, then press Stop.');
+    }
+  }, [engineId]);
 
   // ---- Bounce -----------------------------------------------------------
   const [bouncing, setBouncing] = useState(false);
@@ -467,7 +507,7 @@ export function useInstrument() {
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep, auditioningId,
-    macros, setMacro, macroNames,
+    macros, setMacro, macroNames, setParamByAddress,
     fxDescriptor: FX_DESCRIPTOR, fxValues, setFxParam,
     magicDescriptor: FX_MAGIC_DESCRIPTOR, magicValues, setMagicParam,
     status, setStatus,

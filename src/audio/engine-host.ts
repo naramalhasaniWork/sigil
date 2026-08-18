@@ -4,13 +4,21 @@ import { packParams } from './param-transport';
  * Main-thread facade over the audio graph. The UI never computes audio — it
  * sends messages and reads the analyser for visuals.
  */
+export interface CaptureResult {
+  /** Mono float samples of exactly what was heard. */
+  data: Float32Array;
+  sampleRate: number;
+  /** True when recording stopped because it reached the 60 second ceiling. */
+  hitLimit: boolean;
+}
+
 export class EngineHost {
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private analyserNode: AnalyserNode | null = null;
-  private recorder: MediaRecorder | null = null;
-  private recordDest: MediaStreamAudioDestinationNode | null = null;
-  private chunks: Blob[] = [];
+  /** Resolver for the in-flight capture, settled when the worklet posts back. */
+  private capturePending: ((r: CaptureResult) => void) | null = null;
+  private capturingFlag = false;
 
   /** Exposed so sample decoding can reuse the live context instead of opening another. */
   get context(): AudioContext | null {
@@ -54,13 +62,22 @@ export class EngineHost {
     analyser.connect(master);
     master.connect(ctx.destination);
 
-    const recordDest = ctx.createMediaStreamDestination();
-    master.connect(recordDest);
+    node.port.onmessage = (e: MessageEvent<unknown>): void => {
+      const msg = e.data;
+      if (
+        typeof msg !== 'object' || msg === null ||
+        (msg as { type?: unknown }).type !== 'recording'
+      ) return;
+      const r = msg as { data: Float32Array; sampleRate: number; hitLimit: boolean };
+      this.capturingFlag = false;
+      const resolve = this.capturePending;
+      this.capturePending = null;
+      resolve?.({ data: r.data, sampleRate: r.sampleRate, hitLimit: r.hitLimit });
+    };
 
     this.ctx = ctx;
     this.node = node;
     this.analyserNode = analyser;
-    this.recordDest = recordDest;
   }
 
   noteOn(note: number, velocity: number): void {
@@ -108,32 +125,29 @@ export class EngineHost {
     this.node?.port.postMessage({ type: 'params', data }, [data.buffer]);
   }
 
-  /** Live capture of whatever you play, as opposed to an offline patch bounce. */
-  startRecording(): boolean {
-    if (!this.recordDest || this.recorder) return false;
-    this.chunks = [];
-    const rec = new MediaRecorder(this.recordDest.stream);
-    rec.ondataavailable = (e): void => {
-      if (e.data.size > 0) this.chunks.push(e.data);
-    };
-    rec.start();
-    this.recorder = rec;
+  /**
+   * Live capture of what you actually play, as opposed to an offline patch
+   * bounce. The worklet records its own output and hands back raw samples, so
+   * the result can be encoded as a true WAV — MediaRecorder only ever produces
+   * WebM or MP4 and could never serve the KO II workflow.
+   */
+  startCapture(): boolean {
+    if (!this.node || this.capturingFlag) return false;
+    this.capturingFlag = true;
+    this.node.port.postMessage({ type: 'recordStart' });
     return true;
   }
 
-  async stopRecording(): Promise<Blob | null> {
-    const rec = this.recorder;
-    if (!rec) return null;
-    const done = new Promise<void>((resolve) => {
-      rec.onstop = (): void => resolve();
+  stopCapture(): Promise<CaptureResult | null> {
+    const node = this.node;
+    if (!node || !this.capturingFlag) return Promise.resolve(null);
+    return new Promise<CaptureResult | null>((resolve) => {
+      this.capturePending = resolve;
+      node.port.postMessage({ type: 'recordStop' });
     });
-    rec.stop();
-    await done;
-    this.recorder = null;
-    return this.chunks.length > 0 ? new Blob(this.chunks, { type: this.chunks[0]?.type }) : null;
   }
 
   get isRecording(): boolean {
-    return this.recorder !== null;
+    return this.capturingFlag;
   }
 }
