@@ -13,6 +13,16 @@ import {
 
 export type Layout = 'keys' | 'pads';
 
+const USER_PRESET_KEY = 'sigil.userPresets.v1';
+
+export interface UserPreset {
+  id: string;
+  name: string;
+  engineId: string;
+  values: number[];
+  savedAt: string;
+}
+
 export interface HuntVariation {
   id: string;
   name: string;
@@ -200,12 +210,68 @@ export function useInstrument() {
     [engineId],
   );
 
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+
   const loadPreset = useCallback((presetId: string): void => {
     const preset = PRESETS.find((p) => p.id === presetId);
     if (!preset || !descriptor) return;
     loadValues(presetToValues(preset, descriptor));
+    setActivePresetId(presetId);
     setStatus(`Loaded ${preset.name}`);
   }, [descriptor, loadValues]);
+
+  // ---- User presets ------------------------------------------------------
+  const [userPresets, setUserPresets] = useState<readonly UserPreset[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(USER_PRESET_KEY);
+      if (raw) setUserPresets(JSON.parse(raw) as UserPreset[]);
+    } catch {
+      // Corrupt storage should never stop the instrument from opening.
+    }
+  }, []);
+
+  const persistUserPresets = useCallback((next: readonly UserPreset[]): void => {
+    setUserPresets(next);
+    try {
+      window.localStorage.setItem(USER_PRESET_KEY, JSON.stringify(next));
+    } catch {
+      setStatus('Could not save — browser storage is full or blocked.');
+    }
+  }, []);
+
+  const savePreset = useCallback((name: string): void => {
+    const arr = values[engineId];
+    if (!arr) return;
+    const entry: UserPreset = {
+      id: `user-${engineId}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      name,
+      engineId,
+      values: Array.from(arr),
+      savedAt: new Date().toISOString(),
+    };
+    persistUserPresets([...userPresets.filter((u) => u.id !== entry.id), entry]);
+    setActivePresetId(entry.id);
+    setStatus(`Saved ${name}`);
+  }, [values, engineId, userPresets, persistUserPresets]);
+
+  const loadUserPreset = useCallback((id: string): void => {
+    const found = userPresets.find((u) => u.id === id);
+    if (!found) return;
+    loadValues(Float32Array.from(found.values));
+    setActivePresetId(id);
+    setStatus(`Loaded ${found.name}`);
+  }, [userPresets, loadValues]);
+
+  const deleteUserPreset = useCallback((id: string): void => {
+    persistUserPresets(userPresets.filter((u) => u.id !== id));
+  }, [userPresets, persistUserPresets]);
+
+  const userPresetsForEngine = useMemo(
+    () => userPresets.filter((u) => u.engineId === engineId),
+    [userPresets, engineId],
+  );
 
   // ---- Macros -----------------------------------------------------------
   // Four controls that never move between engines, so your hands learn one
@@ -299,7 +365,8 @@ export function useInstrument() {
     held, noteOn, noteOff, panic,
     recording, toggleRecord,
     bouncing, bounceChord, lastWav,
-    presets: presetsForEngine, loadPreset,
+    presets: presetsForEngine, loadPreset, activePresetId,
+    userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep,
     macros, setMacro, macroNames,
     status, setStatus,

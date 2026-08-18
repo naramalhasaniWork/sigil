@@ -1,5 +1,73 @@
+import { blep } from './blep';
+
 const TWO_PI = 6.283185307179586;
 const DENORMAL = 1e-20;
+
+/** Oscillator shapes, in descriptor step order. */
+export const WAVE_SAW = 0;
+export const WAVE_PULSE = 1;
+export const WAVE_TRIANGLE = 2;
+export const WAVE_SINE = 3;
+export const WAVE_COUNT = 4;
+
+/** A leaky-integrated square settles at ~0.245 peak, whatever the pitch. */
+const TRI_SCALE = 4.083;
+
+/**
+ * Adds `count` antialiased oscillator samples into `out`, scaled by `gain`.
+ *
+ * Block form on purpose. Choosing a waveform per sample means a branch and a
+ * non-inlined call in the hottest loop in the synth, which measured about
+ * twice the cost of the oscillator itself; hoisting the choice outside the
+ * loop and keeping phase in a local makes each shape a tight monomorphic loop.
+ * `ph` holds phases and `tri` the triangle integrator states, indexed by `u`,
+ * so one voice can run several copies without allocating an object per copy.
+ *
+ * Saw and pulse are polyBLEP corrected — a naive version of either aliases
+ * audibly above a few kHz, which is the difference between "digital" and
+ * "harsh". A pulse is two BLEP-corrected saws offset by the pulse width, and
+ * that offset cancels the DC exactly, so no correction term is needed.
+ * Triangle is the leaky integral of a square, which rolls off whatever
+ * aliasing survived the square by a further 6 dB per octave for free.
+ */
+export function addOsc(
+  shape: number, out: Float64Array, count: number,
+  ph: Float64Array, tri: Float64Array, u: number,
+  inc: number, pw: number, gain: number,
+): void {
+  let p = ph[u] as number;
+  if (shape <= WAVE_SAW) {
+    for (let i = 0; i < count; i++) {
+      p += inc; if (p >= 1) p -= 1;
+      out[i] = (out[i] as number) + (2 * p - 1 - blep(p, inc)) * gain;
+    }
+  } else if (shape >= WAVE_SINE) {
+    for (let i = 0; i < count; i++) {
+      p += inc; if (p >= 1) p -= 1;
+      out[i] = (out[i] as number) + Math.sin(p * TWO_PI) * gain;
+    }
+  } else if (shape === WAVE_PULSE) {
+    for (let i = 0; i < count; i++) {
+      p += inc; if (p >= 1) p -= 1;
+      let q = p + pw; if (q >= 1) q -= 1;
+      const sq = (2 * p - 1 - blep(p, inc)) - (2 * q - 1 - blep(q, inc));
+      out[i] = (out[i] as number) + sq * gain;
+    }
+  } else {
+    let t = tri[u] as number;
+    const g = gain * TRI_SCALE;
+    for (let i = 0; i < count; i++) {
+      p += inc; if (p >= 1) p -= 1;
+      let q = p + 0.5; if (q >= 1) q -= 1;
+      const sq = (2 * p - 1 - blep(p, inc)) - (2 * q - 1 - blep(q, inc));
+      t = t * (1 - inc) + inc * sq;
+      if (t < DENORMAL && t > -DENORMAL) t = 0;
+      out[i] = (out[i] as number) + t * g;
+    }
+    tri[u] = t;
+  }
+  ph[u] = p;
+}
 
 /** LFO shapes, in descriptor step order. */
 export const LFO_SINE = 0;
@@ -18,9 +86,8 @@ const WALK_STEP = 0.55;
  * Five shapes, because they do genuinely different jobs: sine and triangle for
  * vibrato and slow swells, square for trills and gating, sample-and-hold for
  * the stepped burbling of an old sequencer, and a smooth random walk for the
- * kind of movement that never repeats and so never announces itself as a
- * loop. Every shape returns -1..1, so any destination can scale it with a
- * single depth number.
+ * kind of movement that never repeats and so never announces itself as a loop.
+ * Every shape returns -1..1, so any destination can scale it with one number.
  *
  * Three details separate a musical LFO from a sine generator:
  *   - **Keysync**: reset the phase on every note, or let it free-run so each
@@ -89,7 +156,7 @@ export class Lfo {
     this.rngState = s === 0 ? 0x6d2b79f5 | 0 : s;
     this.from = this.rand();
     this.to = this.rand();
-    this.held = this.to;
+    this.held = this.from;
   }
 
   /**
@@ -98,10 +165,7 @@ export class Lfo {
    */
   trigger(keysync: boolean): void {
     this.fade = this.fadeInc >= 1 ? 1 : 0;
-    if (keysync) {
-      this.phase = 0;
-      this.held = this.to;
-    }
+    if (keysync) this.phase = 0;
   }
 
   reset(): void {
@@ -117,14 +181,17 @@ export class Lfo {
     if (p >= 1) {
       p -= 1;
       if (p >= 1) p = 0;
-      // One new random per cycle serves both stepped shapes: sample-and-hold
-      // jumps to it, the walk glides towards it.
+      // One new random per cycle drives both stepped shapes: sample-and-hold
+      // jumps straight to it, the walk takes a step of that size towards its
+      // next resting point. The walk REFLECTS off the rails rather than
+      // clamping - a clamped walk parks against a rail and stops moving.
+      const r = this.rand();
+      this.held = r;
       this.from = this.to;
-      let t = this.to + this.rand() * WALK_STEP;
-      if (t > 1) t = 1;
-      if (t < -1) t = -1;
+      let t = this.to + r * WALK_STEP;
+      if (t > 1) t = 2 - t;
+      else if (t < -1) t = -2 - t;
       this.to = t;
-      this.held = t;
     }
     this.phase = p;
 

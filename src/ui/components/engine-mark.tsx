@@ -46,19 +46,36 @@ export function EngineMark({ engineId, colour, size = 22 }: MarkProps): JSX.Elem
 }
 
 /**
- * The SIGIL wordmark: a stem crossed by tines of falling length — a constructed
- * rune that doubles as a decaying spectrum.
+ * The SIGIL seal. A sigil is a constructed mark, so this is built rather than
+ * drawn: one vertical stem, three tines of falling length reading as a decaying
+ * spectrum, and a diagonal that cuts the whole form so it never resolves into a
+ * letter. Asymmetric on purpose — symmetry would make it a logo, not a mark.
  */
-export function SigilMark({ size = 20 }: { size?: number }): JSX.Element {
+export function SigilMark({ size = 22 }: { size?: number }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M4 2 L4 22 M4 6 L20 6 M4 12 L15 12 M4 17 L10 17"
-        stroke="var(--ink)"
-        strokeWidth="2.6"
-        strokeLinecap="square"
-        fill="none"
-      />
+      <g stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="square" fill="none">
+        <path d="M4 2 L4 22" />
+        <path d="M4 5.5 L20 5.5" />
+        <path d="M4 12 L14.5 12" />
+        <path d="M4 18.5 L9.5 18.5" />
+      </g>
+      <path d="M17 2.5 L10 21.5" stroke="var(--analog)" strokeWidth="2.6" strokeLinecap="square" fill="none" />
     </svg>
+  );
+}
+
+/** Wordmark lockup: the seal plus the name, tracked tight so it reads as one object. */
+export function SigilWordmark({ size = 22 }: { size?: number }): JSX.Element {
+  return (
+    <span className="flex items-center gap-2.5">
+      <SigilMark size={size} />
+      <span
+        className="font-bold uppercase"
+        style={{ fontSize: size * 0.82, letterSpacing: '-0.03em', lineHeight: 1 }}
+      >
+        SIGIL
+      </span>
+    </span>
   );
 }

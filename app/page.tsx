@@ -6,7 +6,7 @@ import { useInstrument } from '@/ui/use-instrument';
 import { useComputerKeyboard } from '@/ui/use-computer-keyboard';
 import { useMidi } from '@/ui/use-midi';
 import { EngineRail } from '@/ui/components/engine-rail';
-import { SigilMark } from '@/ui/components/engine-mark';
+import { SigilWordmark } from '@/ui/components/engine-mark';
 import { Transport } from '@/ui/components/transport';
 import { MacroRow } from '@/ui/components/macro-row';
 import { XYPad } from '@/ui/components/xy-pad';
@@ -16,6 +16,7 @@ import { PadGrid } from '@/ui/components/pad-grid';
 import { Keys } from '@/ui/components/keys';
 import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
+import { PresetPanel } from '@/ui/components/preset-panel';
 
 type View = 'sculpt' | 'deep' | 'hunt';
 
@@ -70,11 +71,18 @@ export default function Page(): JSX.Element {
         style={{ borderColor: 'var(--ink)' }}
       >
         <div className="flex items-center gap-2.5">
-          <SigilMark size={20} />
-          <span className="font-bold uppercase tracking-tight text-base">SIGIL</span>
+          <SigilWordmark size={21} />
           <span className="label">{inst.descriptor?.name}</span>
           {midi.supported && midi.deviceName && (
             <span className="label" style={{ color: colour }}>MIDI · {midi.deviceName}</span>
+          )}
+          {inst.status && (
+            <span
+              className="text-[10px] font-bold uppercase tracking-[0.14em] border-[2px] px-2 py-1"
+              style={{ borderColor: colour, color: colour }}
+            >
+              {inst.status}
+            </span>
           )}
         </div>
 
@@ -96,25 +104,15 @@ export default function Page(): JSX.Element {
             activeId={inst.engineId}
             onSelect={inst.selectEngine}
           />
-          <div className="p-2.5 border-t-4" style={{ borderColor: 'var(--ink)' }}>
-            <div className="label mb-2">Presets</div>
-            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-              {inst.presets.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className="text-left text-[11px] font-bold uppercase tracking-[0.06em] py-1"
-                  style={{ color: 'var(--muted)' }}
-                  onClick={(): void => inst.loadPreset(p.id)}
-                >
-                  {p.name}
-                </button>
-              ))}
-              {inst.presets.length === 0 && (
-                <span className="label">None for this engine yet</span>
-              )}
-            </div>
-          </div>
+          <PresetPanel
+            presets={inst.presets}
+            userPresets={inst.userPresets}
+            activeId={inst.activePresetId}
+            colour={colour}
+            onLoad={inst.loadPreset}
+            onLoadUser={inst.loadUserPreset}
+            onSave={inst.savePreset}
+          />
         </aside>
 
         <section className="flex-1 min-w-0 flex flex-col">
@@ -241,13 +239,34 @@ export default function Page(): JSX.Element {
               </button>
             ))}
           </div>
-          {inst.layout === 'keys' && (
-            <div className="flex items-center gap-2">
-              <button type="button" className="label" onClick={(): void => setOctave((o) => Math.max(0, o - 1))}>− OCT</button>
-              <span className="label" style={{ color: colour }}>{octave}</span>
-              <button type="button" className="label" onClick={(): void => setOctave((o) => Math.min(8, o + 1))}>+ OCT</button>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5">
+            <span className="label">Octave</span>
+            <button
+              type="button"
+              aria-label="Octave down"
+              className="hard border-[3px] w-9 h-8 text-sm font-bold leading-none"
+              style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
+              onClick={(): void => setOctave((o) => Math.max(0, o - 1))}
+            >
+              −
+            </button>
+            <span
+              className="border-[3px] px-2.5 h-8 flex items-center text-xs font-bold tabular-nums"
+              style={{ borderColor: colour, color: colour }}
+            >
+              C{octave}
+            </span>
+            <button
+              type="button"
+              aria-label="Octave up"
+              className="hard border-[3px] w-9 h-8 text-sm font-bold leading-none"
+              style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
+              onClick={(): void => setOctave((o) => Math.min(8, o + 1))}
+            >
+              +
+            </button>
+            <span className="label ml-1 hidden sm:inline">[ ]</span>
+          </div>
           <button type="button" className="label" onClick={inst.panic}>Panic</button>
         </div>
 
@@ -267,11 +286,6 @@ export default function Page(): JSX.Element {
           />
         )}
 
-        {inst.status && (
-          <div className="px-3 py-1.5 label border-t-[3px]" style={{ borderColor: '#2A2A28' }}>
-            {inst.status}
-          </div>
-        )}
       </footer>
     </main>
   );

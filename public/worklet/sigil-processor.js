@@ -520,38 +520,6 @@ var ANALOG_DESCRIPTOR = {
   ]
 };
 
-// src/dsp/blep.ts
-function blep(t, dt) {
-  if (t < dt) {
-    const x = t / dt;
-    return x + x - x * x - 1;
-  }
-  if (t > 1 - dt) {
-    const x = (t - 1) / dt;
-    return x * x + x + x + 1;
-  }
-  return 0;
-}
-var SawOscillator = class {
-  phase = 0;
-  inc = 0;
-  sr;
-  constructor(sampleRate2) {
-    this.sr = sampleRate2;
-  }
-  setFrequency(hz) {
-    this.inc = hz / this.sr;
-  }
-  reset() {
-    this.phase = 0;
-  }
-  next() {
-    this.phase += this.inc;
-    if (this.phase >= 1) this.phase -= 1;
-    return 2 * this.phase - 1 - blep(this.phase, this.inc);
-  }
-};
-
 // src/dsp/ladder.ts
 var DENORMAL = 1e-20;
 function saturate(x) {
@@ -601,6 +569,163 @@ var LadderFilter = class {
     return this.s4;
   }
 };
+
+// src/dsp/filters.ts
+var DENORMAL2 = 1e-20;
+var MIN_CUTOFF = 10;
+var MAX_CUTOFF_RATIO = 0.49;
+function softLimit(x, knee, span) {
+  const a = x < 0 ? -x : x;
+  if (a <= knee) return x;
+  const over = a - knee;
+  const lim = over >= span ? knee + span * 0.5 : knee + over * (1 - over / (span + span));
+  return x < 0 ? -lim : lim;
+}
+function asymSat(x) {
+  return x >= 0 ? softLimit(x, 0.7, 1.4) : softLimit(x, 1.4, 2.8);
+}
+var StateVariableFilter = class {
+  ic1 = 0;
+  ic2 = 0;
+  a1 = 0;
+  a2 = 0;
+  a3 = 0;
+  g = 0;
+  k = 2;
+  cLp = 1;
+  cBp = 0;
+  cHp = 0;
+  sr;
+  maxCutoff;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    this.maxCutoff = sampleRate2 * MAX_CUTOFF_RATIO;
+    this.setCutoff(1e3);
+    this.setResonance(0);
+  }
+  setCutoff(hz) {
+    const c = hz < MIN_CUTOFF ? MIN_CUTOFF : hz > this.maxCutoff ? this.maxCutoff : hz;
+    this.g = Math.tan(Math.PI * c / this.sr);
+    this.updateCoeffs();
+  }
+  /** 0 = flat, 1 = a ~30 dB peak that rings for a long time. */
+  setResonance(r) {
+    const clamped = r < 0 ? 0 : r > 1 ? 1 : r;
+    this.k = 2 - 1.97 * clamped;
+    this.updateCoeffs();
+  }
+  setMode(mode) {
+    this.cLp = mode === "lp" ? 1 : 0;
+    this.cBp = mode === "bp" ? 1 : 0;
+    this.cHp = mode === "hp" ? 1 : 0;
+  }
+  reset() {
+    this.ic1 = 0;
+    this.ic2 = 0;
+  }
+  updateCoeffs() {
+    this.a1 = 1 / (1 + this.g * (this.g + this.k));
+    this.a2 = this.g * this.a1;
+    this.a3 = this.g * this.a2;
+  }
+  process(x) {
+    const v3 = x - this.ic2;
+    const v1 = this.a1 * this.ic1 + this.a2 * v3;
+    const v2 = this.ic2 + this.a2 * this.ic1 + this.a3 * v3;
+    let s1 = v1 + v1 - this.ic1;
+    let s2 = v2 + v2 - this.ic2;
+    s1 = softLimit(s1, 3, 6);
+    s2 = softLimit(s2, 3, 6);
+    if (s1 < DENORMAL2 && s1 > -DENORMAL2) s1 = 0;
+    if (s2 < DENORMAL2 && s2 > -DENORMAL2) s2 = 0;
+    this.ic1 = s1;
+    this.ic2 = s2;
+    const out = this.cLp * v2 + this.cBp * v1 + this.cHp * (x - this.k * v1 - v2);
+    if (!(out > -1e12 && out < 1e12)) {
+      this.reset();
+      return 0;
+    }
+    return out;
+  }
+};
+var DiodeFilter = class {
+  z1 = 0;
+  z2 = 0;
+  z3 = 0;
+  z4 = 0;
+  g1 = 0;
+  g2 = 0;
+  g3 = 0;
+  g4 = 0;
+  oneMinusG = 0;
+  invDen = 1;
+  k = 0;
+  sr;
+  maxCutoff;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    this.maxCutoff = sampleRate2 * MAX_CUTOFF_RATIO;
+    this.setCutoff(1e3);
+    this.setResonance(0);
+  }
+  setCutoff(hz) {
+    const c = hz < MIN_CUTOFF ? MIN_CUTOFF : hz > this.maxCutoff ? this.maxCutoff : hz;
+    const g = Math.tan(Math.PI * c / this.sr);
+    const gg = g / (1 + g);
+    this.g1 = gg;
+    this.g2 = gg * gg;
+    this.g3 = this.g2 * gg;
+    this.g4 = this.g3 * gg;
+    this.oneMinusG = 1 - gg;
+    this.updateDen();
+  }
+  /** Past ~0.9 the loop gain passes unity and the filter sings on its own. */
+  setResonance(r) {
+    const clamped = r < 0 ? 0 : r > 1 ? 1 : r;
+    this.k = 4.5 * clamped;
+    this.updateDen();
+  }
+  reset() {
+    this.z1 = 0;
+    this.z2 = 0;
+    this.z3 = 0;
+    this.z4 = 0;
+  }
+  updateDen() {
+    this.invDen = 1 / (1 + this.k * this.g4);
+  }
+  process(x) {
+    const s1 = this.oneMinusG * this.z1;
+    const s2 = this.oneMinusG * this.z2;
+    const s3 = this.oneMinusG * this.z3;
+    const s4 = this.oneMinusG * this.z4;
+    const sfb = this.g3 * s1 + this.g2 * s2 + this.g1 * s3 + s4;
+    const yLin = (this.g4 * x + sfb) * this.invDen;
+    const u = x - this.k * asymSat(yLin);
+    const y1 = this.g1 * u + s1;
+    this.z1 = y1 + y1 - this.z1;
+    const y2 = this.g1 * y1 + s2;
+    this.z2 = y2 + y2 - this.z2;
+    const y3 = this.g1 * y2 + s3;
+    this.z3 = y3 + y3 - this.z3;
+    const y4 = this.g1 * y3 + s4;
+    this.z4 = y4 + y4 - this.z4;
+    if (this.z1 < DENORMAL2 && this.z1 > -DENORMAL2) this.z1 = 0;
+    if (this.z2 < DENORMAL2 && this.z2 > -DENORMAL2) this.z2 = 0;
+    if (this.z3 < DENORMAL2 && this.z3 > -DENORMAL2) this.z3 = 0;
+    if (this.z4 < DENORMAL2 && this.z4 > -DENORMAL2) this.z4 = 0;
+    if (!(y4 > -1e12 && y4 < 1e12)) {
+      this.reset();
+      return 0;
+    }
+    return y4;
+  }
+};
+function createFilter(model, sampleRate2) {
+  if (model === "svf") return new StateVariableFilter(sampleRate2);
+  if (model === "diode") return new DiodeFilter(sampleRate2);
+  return new LadderFilter(sampleRate2);
+}
 
 // src/dsp/envelope.ts
 var IDLE = 0;
@@ -685,6 +810,195 @@ var Smoother = class {
   }
 };
 
+// src/dsp/blep.ts
+function blep(t, dt) {
+  if (t < dt) {
+    const x = t / dt;
+    return x + x - x * x - 1;
+  }
+  if (t > 1 - dt) {
+    const x = (t - 1) / dt;
+    return x * x + x + x + 1;
+  }
+  return 0;
+}
+var SawOscillator = class {
+  phase = 0;
+  inc = 0;
+  sr;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+  }
+  setFrequency(hz) {
+    this.inc = hz / this.sr;
+  }
+  reset() {
+    this.phase = 0;
+  }
+  next() {
+    this.phase += this.inc;
+    if (this.phase >= 1) this.phase -= 1;
+    return 2 * this.phase - 1 - blep(this.phase, this.inc);
+  }
+};
+
+// src/dsp/lfo.ts
+var TWO_PI = 6.283185307179586;
+var DENORMAL3 = 1e-20;
+var WAVE_SAW = 0;
+var WAVE_PULSE = 1;
+var WAVE_SINE = 3;
+var TRI_SCALE = 4.083;
+function addOsc(shape, out, count, ph, tri, u, inc, pw, gain) {
+  let p = ph[u];
+  if (shape <= WAVE_SAW) {
+    for (let i = 0; i < count; i++) {
+      p += inc;
+      if (p >= 1) p -= 1;
+      out[i] = out[i] + (2 * p - 1 - blep(p, inc)) * gain;
+    }
+  } else if (shape >= WAVE_SINE) {
+    for (let i = 0; i < count; i++) {
+      p += inc;
+      if (p >= 1) p -= 1;
+      out[i] = out[i] + Math.sin(p * TWO_PI) * gain;
+    }
+  } else if (shape === WAVE_PULSE) {
+    for (let i = 0; i < count; i++) {
+      p += inc;
+      if (p >= 1) p -= 1;
+      let q = p + pw;
+      if (q >= 1) q -= 1;
+      const sq = 2 * p - 1 - blep(p, inc) - (2 * q - 1 - blep(q, inc));
+      out[i] = out[i] + sq * gain;
+    }
+  } else {
+    let t = tri[u];
+    const g = gain * TRI_SCALE;
+    for (let i = 0; i < count; i++) {
+      p += inc;
+      if (p >= 1) p -= 1;
+      let q = p + 0.5;
+      if (q >= 1) q -= 1;
+      const sq = 2 * p - 1 - blep(p, inc) - (2 * q - 1 - blep(q, inc));
+      t = t * (1 - inc) + inc * sq;
+      if (t < DENORMAL3 && t > -DENORMAL3) t = 0;
+      out[i] = out[i] + t * g;
+    }
+    tri[u] = t;
+  }
+  ph[u] = p;
+}
+var LFO_SINE = 0;
+var LFO_TRIANGLE = 1;
+var LFO_SQUARE = 2;
+var LFO_SAMPLE_HOLD = 3;
+var LFO_SHAPE_COUNT = 5;
+var WALK_STEP = 0.55;
+var Lfo = class {
+  phase = 0;
+  inc = 0;
+  shape = LFO_SINE;
+  depth = 1;
+  fade = 1;
+  fadeInc = 1;
+  held = 0;
+  from = 0;
+  to = 0;
+  rngState = 2654435769 | 0;
+  sr;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2 > 1 ? sampleRate2 : 1;
+    this.setRate(4);
+  }
+  /** Deterministic xorshift32 in -1..1. Seeded per voice, never Math.random. */
+  rand() {
+    let s = this.rngState;
+    s ^= s << 13;
+    s |= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    s |= 0;
+    this.rngState = s;
+    return (s >>> 0) / 2147483648 - 1;
+  }
+  setRate(hz) {
+    const max = this.sr * 0.45;
+    const f = !(hz > 0) ? 0 : hz > max ? max : hz;
+    this.inc = f / this.sr;
+  }
+  setShape(shape) {
+    const s = Math.round(shape);
+    this.shape = s < 0 ? 0 : s >= LFO_SHAPE_COUNT ? LFO_SHAPE_COUNT - 1 : s;
+  }
+  /** Overall output scale, 0..1. Destination depths multiply on top of this. */
+  setDepth(depth) {
+    this.depth = !(depth > 0) ? 0 : depth > 1 ? 1 : depth;
+  }
+  /** Time the LFO takes to fade up to full after each note starts. */
+  setDelayMs(ms) {
+    const samples = ms / 1e3 * this.sr;
+    this.fadeInc = samples >= 1 ? 1 / samples : 1;
+  }
+  /** Decorrelates one voice from the next; same index gives the same stream. */
+  seed(voiceIndex) {
+    const s = Math.trunc(voiceIndex) * 2654435761 + 2246822507 | 0;
+    this.rngState = s === 0 ? 1831565813 | 0 : s;
+    this.from = this.rand();
+    this.to = this.rand();
+    this.held = this.from;
+  }
+  /**
+   * Note start. The fade always restarts; the phase only resets when the
+   * patch asked for keysync.
+   */
+  trigger(keysync) {
+    this.fade = this.fadeInc >= 1 ? 1 : 0;
+    if (keysync) this.phase = 0;
+  }
+  reset() {
+    this.phase = 0;
+    this.fade = 1;
+    this.from = 0;
+    this.to = 0;
+    this.held = 0;
+  }
+  next() {
+    let p = this.phase + this.inc;
+    if (p >= 1) {
+      p -= 1;
+      if (p >= 1) p = 0;
+      const r = this.rand();
+      this.held = r;
+      this.from = this.to;
+      let t = this.to + r * WALK_STEP;
+      if (t > 1) t = 2 - t;
+      else if (t < -1) t = -2 - t;
+      this.to = t;
+    }
+    this.phase = p;
+    let v;
+    if (this.shape === LFO_SINE) {
+      v = Math.sin(p * TWO_PI);
+    } else if (this.shape === LFO_TRIANGLE) {
+      v = p < 0.5 ? 4 * p - 1 : 3 - 4 * p;
+    } else if (this.shape === LFO_SQUARE) {
+      v = p < 0.5 ? 1 : -1;
+    } else if (this.shape === LFO_SAMPLE_HOLD) {
+      v = this.held;
+    } else {
+      const s = p * p * (3 - 2 * p);
+      v = this.from + (this.to - this.from) * s;
+    }
+    if (this.fade < 1) {
+      this.fade += this.fadeInc;
+      if (this.fade > 1) this.fade = 1;
+    }
+    const out = v * this.depth * this.fade;
+    return out < DENORMAL3 && out > -DENORMAL3 ? 0 : out;
+  }
+};
+
 // src/dsp/analog-voice.ts
 var P_DETUNE = 0;
 var P_DRIFT = 1;
@@ -696,102 +1010,272 @@ var P_DECAY = 6;
 var P_SUSTAIN = 7;
 var P_RELEASE = 8;
 var P_DRIVE = 9;
+var P_WAVE1 = 10;
+var P_WAVE2 = 11;
+var P_PW = 12;
+var P_MIX = 13;
+var P_SUB_MODE = 14;
+var P_SUB_LEVEL = 15;
+var P_NOISE = 16;
+var P_UNISON = 17;
+var P_SPREAD = 18;
+var P_GLIDE = 19;
+var P_KEYTRACK = 20;
+var P_MODEL = 21;
+var P_VEL_CUT = 22;
+var P_VEL_AMP = 23;
+var P_CURVE = 24;
+var P_LFO_RATE = 25;
+var P_LFO_SHAPE = 26;
+var P_LFO_DELAY = 27;
+var P_LFO_SYNC = 28;
+var P_LFO_PITCH = 29;
+var P_LFO_CUT = 30;
+var P_LFO_PW = 31;
+var P_LFO_AMP = 32;
+var LN2 = 0.6931471805599453;
+var TWO_PI2 = 6.283185307179586;
+var CENT = 57762265e-11;
+var LOG2_REF = 8.03125;
+var CONTROL_STEP = 8;
+var MAX_UNISON = 4;
+var OSC_GAIN = 0.8;
+var VOICE_GAIN = 0.35;
 function saturate2(x) {
   const x2 = x * x;
   return x * (27 + x2) / (27 + 9 * x2);
 }
+function bend(v, k) {
+  return v * (1 + k) / (1 + k * v);
+}
 var AnalogVoice = class {
-  osc1;
-  osc2;
-  filter;
+  ladder;
+  svf;
+  diode;
+  activeFilter;
   ampEnv;
   filterEnv;
   cutoffSmooth;
+  lfo;
   params = new Float32Array(ANALOG_DESCRIPTOR.params.length);
-  baseFreq = 220;
+  ph1 = new Float64Array(MAX_UNISON);
+  ph2 = new Float64Array(MAX_UNISON);
+  tri1 = new Float64Array(MAX_UNISON);
+  tri2 = new Float64Array(MAX_UNISON);
+  inc1 = new Float64Array(MAX_UNISON);
+  inc2 = new Float64Array(MAX_UNISON);
+  driftPhase = new Float64Array(MAX_UNISON);
+  driftInc = new Float64Array(MAX_UNISON);
+  /** Detune positions per unison count, row-major: (count - 1) * 4 + slot. */
+  spread = new Float64Array(MAX_UNISON * MAX_UNISON);
+  /** Oscillator sum for one control step, before filter and amplifier. */
+  mix = new Float64Array(CONTROL_STEP);
+  invSr;
+  ctrlRate;
+  maxFreq;
+  uni = 1;
+  uniGain = 1;
+  subPh = new Float64Array(1);
+  subTri = new Float64Array(1);
+  subInc = 0;
+  subRatio = 0.5;
+  detuneMul = 1;
+  noiseState = 2654435769 | 0;
+  ctrl = 0;
+  pw = 0.5;
+  ampMod = 1;
+  envK = 0;
+  logFreq = 7.78;
+  logTarget = 7.78;
+  glideCoeff = 1;
   velocity = 1;
   active = false;
-  driftPhase = 0;
-  driftInc;
   constructor(sampleRate2) {
-    this.osc1 = new SawOscillator(sampleRate2);
-    this.osc2 = new SawOscillator(sampleRate2);
-    this.filter = new LadderFilter(sampleRate2);
+    this.invSr = 1 / sampleRate2;
+    this.ctrlRate = sampleRate2 / CONTROL_STEP;
+    this.maxFreq = sampleRate2 * 0.45;
+    this.ladder = createFilter("ladder", sampleRate2);
+    this.svf = createFilter("svf", sampleRate2);
+    this.diode = createFilter("diode", sampleRate2);
+    this.activeFilter = this.ladder;
     this.ampEnv = new Envelope(sampleRate2);
-    this.filterEnv = new Envelope(sampleRate2);
-    this.cutoffSmooth = new Smoother(sampleRate2, 8);
-    this.driftInc = 0.13 / sampleRate2;
-    for (let i = 0; i < ANALOG_DESCRIPTOR.params.length; i++) {
+    this.filterEnv = new Envelope(this.ctrlRate);
+    this.cutoffSmooth = new Smoother(sampleRate2 / CONTROL_STEP, 8);
+    this.lfo = new Lfo(sampleRate2 / CONTROL_STEP);
+    for (let i = 0; i < this.params.length; i++) {
       this.params[i] = ANALOG_DESCRIPTOR.params[i]?.default ?? 0;
     }
+    this.spread[4] = -1;
+    this.spread[5] = 1;
+    this.spread[8] = -1;
+    this.spread[10] = 1;
+    this.spread[12] = -1;
+    this.spread[13] = -0.34;
+    this.spread[14] = 0.34;
+    this.spread[15] = 1;
+    this.applyEnvelopes();
+    this.applyLfo();
     this.cutoffSmooth.snap(this.params[P_CUTOFF]);
   }
   setParam(index, value) {
     if (index < 0 || index >= this.params.length) return;
     this.params[index] = value;
-    if (index === P_ATTACK || index === P_DECAY || index === P_SUSTAIN || index === P_RELEASE) {
-      this.applyEnvelopes();
-    }
+    if (index >= P_ATTACK && index <= P_RELEASE) this.applyEnvelopes();
+    else if (index === P_CURVE) this.envK = (value - 0.5) * 1.6;
+    else if (index >= P_LFO_RATE && index <= P_LFO_DELAY) this.applyLfo();
   }
   applyEnvelopes() {
-    this.ampEnv.set(
-      this.params[P_ATTACK],
-      this.params[P_DECAY],
-      this.params[P_SUSTAIN],
-      this.params[P_RELEASE]
-    );
-    this.filterEnv.set(
-      this.params[P_ATTACK],
-      this.params[P_DECAY] * 0.8,
-      this.params[P_SUSTAIN] * 0.5,
-      this.params[P_RELEASE]
-    );
+    const p = this.params;
+    const a = p[P_ATTACK], d = p[P_DECAY];
+    const s = p[P_SUSTAIN], r = p[P_RELEASE];
+    this.ampEnv.set(a, d, s, r);
+    this.filterEnv.set(a, d * 0.8, s * 0.5, r);
+  }
+  applyLfo() {
+    this.lfo.setRate(this.params[P_LFO_RATE]);
+    this.lfo.setShape(this.params[P_LFO_SHAPE]);
+    this.lfo.setDelayMs(this.params[P_LFO_DELAY]);
   }
   noteOn(freq, velocity, voiceIndex) {
-    this.baseFreq = freq;
-    this.velocity = velocity;
-    this.active = true;
-    this.driftPhase = voiceIndex * 0.37 % 1;
-    this.filter.reset();
+    const p = this.params;
+    const f = freq > 8 ? freq < 12e3 ? freq : 12e3 : 8;
+    const target = Math.log2(f);
+    const glideMs = p[P_GLIDE];
+    if (!this.active || !(glideMs > 0)) this.logFreq = target;
+    this.logTarget = target;
+    const steps = Math.max(1, glideMs / 1e3 * this.ctrlRate);
+    this.glideCoeff = glideMs > 0 ? 1 - Math.exp(-4 / steps) : 1;
+    this.velocity = velocity > 0 ? velocity < 1 ? velocity : 1 : 0;
+    this.envK = (p[P_CURVE] - 0.5) * 1.6;
+    const n = Math.round(p[P_UNISON]);
+    this.uni = n < 1 ? 1 : n > MAX_UNISON ? MAX_UNISON : n;
+    this.uniGain = 1 / Math.sqrt(this.uni);
+    for (let u = 0; u < MAX_UNISON; u++) {
+      this.ph1[u] = ((voiceIndex * 0.137 + u * 0.618) % 1 + 1) % 1;
+      this.ph2[u] = ((voiceIndex * 0.311 + u * 0.382) % 1 + 1) % 1;
+      this.tri1[u] = 0;
+      this.tri2[u] = 0;
+      this.driftPhase[u] = ((voiceIndex * 0.37 + u * 0.211) % 1 + 1) % 1;
+      this.driftInc[u] = (0.11 + u * 0.041 + voiceIndex % 4 * 0.017) * this.invSr * CONTROL_STEP;
+    }
+    this.subPh[0] = 0;
+    const seed = (voiceIndex + 1) * 1831565813 | 0;
+    this.noiseState = seed === 0 ? 2654435769 | 0 : seed;
+    this.ladder.reset();
+    this.svf.reset();
+    this.diode.reset();
     this.applyEnvelopes();
+    this.applyLfo();
+    this.lfo.seed(voiceIndex);
+    this.lfo.trigger(p[P_LFO_SYNC] >= 0.5);
     this.ampEnv.trigger();
     this.filterEnv.trigger();
-    this.cutoffSmooth.snap(this.params[P_CUTOFF]);
+    this.cutoffSmooth.snap(p[P_CUTOFF]);
+    this.ctrl = 0;
+    this.active = true;
   }
   noteOff() {
     this.ampEnv.release();
     this.filterEnv.release();
   }
-  /**
-   * True only once a note has been triggered and its amp envelope has run out.
-   * A freshly allocated voice reports false; VoiceManager only asks about
-   * slots it has marked busy, so that is correct but worth knowing.
-   */
+  /** True once a note has been triggered and its amp envelope has run out. */
   isFinished() {
     return this.active && this.ampEnv.isFinished();
   }
+  /** Everything that moves slower than audio, recomputed once per control step. */
+  updateControl() {
+    const p = this.params;
+    const lfoV = this.lfo.next();
+    this.logFreq += this.glideCoeff * (this.logTarget - this.logFreq);
+    const vib = p[P_LFO_PITCH] * p[P_LFO_PITCH] * lfoV;
+    const base = Math.exp(LN2 * (this.logFreq + vib));
+    const driftAmt = p[P_DRIFT] * 0.012;
+    const spreadAmt = p[P_SPREAD] * 30 * CENT;
+    const row = (this.uni - 1) * MAX_UNISON;
+    const max = this.maxFreq;
+    for (let u = 0; u < this.uni; u++) {
+      let dp = this.driftPhase[u] + this.driftInc[u];
+      if (dp >= 1) dp -= 1;
+      this.driftPhase[u] = dp;
+      const dev = Math.sin(dp * TWO_PI2) * driftAmt + this.spread[row + u] * spreadAmt;
+      const f1 = base * (1 + dev);
+      const f2 = base * this.detuneMul * (1 - dev);
+      this.inc1[u] = (f1 > max ? max : f1 < 0.01 ? 0.01 : f1) * this.invSr;
+      this.inc2[u] = (f2 > max ? max : f2 < 0.01 ? 0.01 : f2) * this.invSr;
+    }
+    const fs = base * this.subRatio;
+    this.subInc = (fs > max ? max : fs < 0.01 ? 0.01 : fs) * this.invSr;
+    const fenv = bend(this.filterEnv.next(), this.envK);
+    const oct = p[P_KEYTRACK] * (this.logFreq - LOG2_REF) + p[P_LFO_CUT] * 3 * lfoV - p[P_VEL_CUT] * 4 * (1 - this.velocity);
+    let cut = this.cutoffSmooth.next() * Math.exp(LN2 * oct) * (1 + p[P_FILTER_ENV] * fenv * 6);
+    if (!(cut > 10)) cut = 10;
+    else if (cut > max) cut = max;
+    this.activeFilter.setCutoff(cut);
+    const w = p[P_PW] + p[P_LFO_PW] * lfoV * 0.45;
+    this.pw = w < 0.06 ? 0.06 : w > 0.94 ? 0.94 : w;
+    this.ampMod = 1 - p[P_LFO_AMP] * 0.5 * (1 - lfoV);
+  }
   render(out, offset, count) {
     if (!this.active) return;
-    const detuneRatio = Math.pow(2, this.params[P_DETUNE] / 12);
-    const driftAmt = this.params[P_DRIFT];
-    const envAmt = this.params[P_FILTER_ENV];
-    const drive = 1 + this.params[P_DRIVE] * 6;
-    const driveComp = 1 / Math.sqrt(drive);
-    this.filter.setResonance(this.params[P_RES]);
-    this.cutoffSmooth.setTarget(this.params[P_CUTOFF]);
-    for (let i = 0; i < count; i++) {
-      this.driftPhase += this.driftInc;
-      if (this.driftPhase > 1) this.driftPhase -= 1;
-      const drift = Math.sin(this.driftPhase * 6.283185307) * driftAmt * 0.012;
-      this.osc1.setFrequency(this.baseFreq * (1 + drift));
-      this.osc2.setFrequency(this.baseFreq * detuneRatio * (1 - drift));
-      let sig = (this.osc1.next() + this.osc2.next()) * 0.4;
-      sig = saturate2(sig * drive) * driveComp;
-      const fenv = this.filterEnv.next();
-      this.filter.setCutoff(this.cutoffSmooth.next() * (1 + envAmt * fenv * 6));
-      const y = this.filter.process(sig) * this.ampEnv.next() * this.velocity * 0.35;
-      out[offset + i] = out[offset + i] + (y === y ? y : 0);
+    const p = this.params;
+    const model = Math.round(p[P_MODEL]);
+    const filter = model === 1 ? this.svf : model === 2 ? this.diode : this.ladder;
+    this.activeFilter = filter;
+    filter.setResonance(p[P_RES]);
+    const drive = 1 + p[P_DRIVE] * 6, driveComp = 1 / Math.sqrt(drive);
+    const w1 = Math.round(p[P_WAVE1]), w2 = Math.round(p[P_WAVE2]);
+    const raw = p[P_MIX];
+    const bal = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+    const g1 = (1 - bal) * OSC_GAIN * this.uniGain, g2 = bal * OSC_GAIN * this.uniGain;
+    const subMode = Math.round(p[P_SUB_MODE]);
+    const subShape = subMode >= 2 ? WAVE_SINE : WAVE_PULSE;
+    const subLevel = p[P_SUB_LEVEL] * 0.9;
+    const noiseLevel = p[P_NOISE] * 0.5, velAmp = p[P_VEL_AMP];
+    const gain = (1 - velAmp + velAmp * this.velocity * this.velocity) * VOICE_GAIN;
+    const n = this.uni;
+    const k = this.envK;
+    this.detuneMul = Math.exp(LN2 * p[P_DETUNE] / 12);
+    this.subRatio = (subMode & 1) === 1 ? 0.25 : 0.5;
+    this.cutoffSmooth.setTarget(p[P_CUTOFF]);
+    const mix = this.mix;
+    let noise = this.noiseState;
+    let i = 0;
+    while (i < count) {
+      if (this.ctrl === 0) {
+        this.updateControl();
+        this.ctrl = CONTROL_STEP;
+      }
+      const m = this.ctrl < count - i ? this.ctrl : count - i;
+      const pw = this.pw;
+      for (let j = 0; j < m; j++) mix[j] = 0;
+      for (let u = 0; u < n; u++) {
+        addOsc(w1, mix, m, this.ph1, this.tri1, u, this.inc1[u], pw, g1);
+        addOsc(w2, mix, m, this.ph2, this.tri2, u, this.inc2[u], pw, g2);
+      }
+      if (subLevel > 0) {
+        addOsc(subShape, mix, m, this.subPh, this.subTri, 0, this.subInc, 0.5, subLevel);
+      }
+      const amp = gain * this.ampMod;
+      for (let j = 0; j < m; j++) {
+        let sig = mix[j];
+        if (noiseLevel > 0) {
+          noise ^= noise << 13;
+          noise |= 0;
+          noise ^= noise >>> 17;
+          noise ^= noise << 5;
+          noise |= 0;
+          sig += ((noise >>> 0) / 2147483648 - 1) * noiseLevel;
+        }
+        sig = saturate2(sig * drive) * driveComp;
+        const e = this.ampEnv.next();
+        let y = filter.process(sig) * (k === 0 ? e : bend(e, k)) * amp;
+        if (!(y > -4 && y < 4)) y = y > 0 ? 4 : y < 0 ? -4 : 0;
+        out[offset + i + j] = out[offset + i + j] + y;
+      }
+      i += m;
+      this.ctrl -= m;
     }
+    this.noiseState = noise;
   }
 };
 var AnalogEngine = {
@@ -1038,7 +1522,7 @@ var P_OP_STRIDE = 3;
 var P_INDEX = 13;
 var P_KEY_SCALE = 14;
 var P_FEEDBACK = 15;
-var P_SPREAD = 16;
+var P_SPREAD2 = 16;
 var P_BALANCE = 17;
 var P_AMP_A = 18;
 var P_MOD_A = 22;
@@ -1127,7 +1611,7 @@ var FmVoice = class {
   }
   /** Block-rate work: operator increments, levels, carrier balance, key scaling. */
   updateBlock() {
-    const spread = this.params[P_SPREAD];
+    const spread = this.params[P_SPREAD2];
     for (let k = 0; k < N_OPS; k++) {
       const b = P_OP_BASE + k * P_OP_STRIDE;
       const ratio = quantizeRatio(this.params[b]);
@@ -1435,10 +1919,10 @@ var EX_NOISE = 1;
 var EX_BOW = 2;
 var MAX_MODES = 20;
 var MATERIALS = 4;
-var DENORMAL2 = 1e-20;
+var DENORMAL4 = 1e-20;
 var R_MAX = 0.99997;
 var LN1000 = 6.907755278982137;
-var TWO_PI = 6.283185307179586;
+var TWO_PI3 = 6.283185307179586;
 var RATIOS = new Float32Array([
   // membrane: circular drum head, stretched and strongly inharmonic
   1,
@@ -1602,7 +2086,7 @@ var PhysicalVoice = class {
     const decayExp = decTilt + damping * 1.6;
     const ampExp = (air - 0.5) * 1.4;
     const nyquist = this.sr * 0.47;
-    const wScale = TWO_PI / this.sr;
+    const wScale = TWO_PI3 / this.sr;
     let want = 3 + Math.round(air * (MAX_MODES - 3));
     if (want > MAX_MODES) want = MAX_MODES;
     let count = 0;
@@ -1714,8 +2198,8 @@ var PhysicalVoice = class {
       out[offset + i] = out[offset + i] + v;
     }
     for (let m = 0; m < n; m++) {
-      if (y1[m] < DENORMAL2 && y1[m] > -DENORMAL2) y1[m] = 0;
-      if (y2[m] < DENORMAL2 && y2[m] > -DENORMAL2) y2[m] = 0;
+      if (y1[m] < DENORMAL4 && y1[m] > -DENORMAL4) y1[m] = 0;
+      if (y2[m] < DENORMAL4 && y2[m] > -DENORMAL4) y2[m] = 0;
     }
     this.rng = rs;
     if (peak < 1e-4 && excPeak < 1e-4) this.quietBlocks++;
@@ -1890,8 +2374,8 @@ var P_DECAY3 = 8;
 var P_SUSTAIN2 = 9;
 var P_RELEASE3 = 10;
 var MAX_GRAINS = 32;
-var DENORMAL3 = 1e-20;
-var TWO_PI2 = 6.283185307179586;
+var DENORMAL5 = 1e-20;
+var TWO_PI4 = 6.283185307179586;
 var SOURCE_SR = 48e3;
 var SOURCE_SECONDS = 3;
 var SOURCE_ROOT_HZ = 110;
@@ -1931,7 +2415,7 @@ function getSource() {
   let peak = 1e-9;
   for (let i = 0; i < len; i++) {
     const t = i / len;
-    const wob = Math.sin(t * TWO_PI2 * 3) * 4e-3;
+    const wob = Math.sin(t * TWO_PI4 * 3) * 4e-3;
     s1.setFrequency(SOURCE_ROOT_HZ);
     s2.setFrequency(SOURCE_ROOT_HZ * (1.006 + wob));
     s3.setFrequency(SOURCE_ROOT_HZ * 2 * (0.994 - wob));
@@ -1941,8 +2425,8 @@ function getSource() {
     rng ^= rng << 5;
     rng >>>= 0;
     const noise = rng / 4294967296 * 2 - 1;
-    noiseFilter.setCutoff(300 * Math.pow(2, 4.5 * (0.5 - 0.5 * Math.cos(t * TWO_PI2 * 2))));
-    const air = 0.2 + 0.28 * (0.5 - 0.5 * Math.cos(t * TWO_PI2 * 5));
+    noiseFilter.setCutoff(300 * Math.pow(2, 4.5 * (0.5 - 0.5 * Math.cos(t * TWO_PI4 * 2))));
+    const air = 0.2 + 0.28 * (0.5 - 0.5 * Math.cos(t * TWO_PI4 * 5));
     const v = (s1.next() + s2.next() + s3.next() * 0.6) * 0.32 + noiseFilter.process(noise) * air * 1.1;
     buf[i] = v;
     if (v > peak) peak = v;
@@ -2115,8 +2599,8 @@ var GranularVoice = class {
       }
       const mono = (sumL + sumR) * 0.7071067811865476;
       let hp = mono - this.dcX1 + 0.995 * this.dcY1;
-      if (hp < DENORMAL3 && hp > -DENORMAL3) hp = 0;
-      this.dcX1 = mono < DENORMAL3 && mono > -DENORMAL3 ? 0 : mono;
+      if (hp < DENORMAL5 && hp > -DENORMAL5) hp = 0;
+      this.dcX1 = mono < DENORMAL5 && mono > -DENORMAL5 ? 0 : mono;
       this.dcY1 = hp;
       const y = saturate3(hp * 0.7) * this.ampEnv.next() * this.velocity * 0.9;
       out[offset + i] = out[offset + i] + (y === y ? y : 0);

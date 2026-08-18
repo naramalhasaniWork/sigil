@@ -1,10 +1,9 @@
 import type { EngineModule, EngineVoice } from '@/audio/types';
 import { ANALOG_DESCRIPTOR } from './analog-descriptor';
-import { blep } from './blep';
 import { createFilter, type Filter } from './filters';
 import { Envelope } from './envelope';
 import { Smoother } from './smoothing';
-import { Lfo } from './lfo';
+import { Lfo, addOsc, WAVE_PULSE, WAVE_SINE } from './lfo';
 
 const P_DETUNE = 0, P_DRIFT = 1, P_CUTOFF = 2, P_RES = 3, P_FILTER_ENV = 4;
 const P_ATTACK = 5, P_DECAY = 6, P_SUSTAIN = 7, P_RELEASE = 8, P_DRIVE = 9;
@@ -15,22 +14,19 @@ const P_KEYTRACK = 20, P_MODEL = 21, P_VEL_CUT = 22, P_VEL_AMP = 23, P_CURVE = 2
 const P_LFO_RATE = 25, P_LFO_SHAPE = 26, P_LFO_DELAY = 27, P_LFO_SYNC = 28;
 const P_LFO_PITCH = 29, P_LFO_CUT = 30, P_LFO_PW = 31, P_LFO_AMP = 32;
 
-const TWO_PI = 6.283185307179586;
 const LN2 = 0.6931471805599453;
+const TWO_PI = 6.283185307179586;
 /** One cent as a fractional frequency change; exact enough under 100 cents. */
 const CENT = 5.7762265e-4;
 /** log2(261.6256) — middle C, the note key tracking pivots around. */
 const LOG2_REF = 8.0312500;
-const DENORMAL = 1e-20;
 /**
  * Modulation runs once per this many samples (6 kHz at 48 k). Pitch, cutoff,
- * pulse width and the LFO all move far slower than audio, and computing them
- * per sample costs an exp() and a tan() per voice for nothing audible.
+ * pulse width and the LFO move far slower than audio; recomputing them per
+ * sample costs an exp() and a tan() per voice for nothing audible.
  */
 const CONTROL_STEP = 8;
 const MAX_UNISON = 4;
-/** Leaky-integrated square lands at ~0.245 peak whatever the pitch. */
-const TRI_SCALE = 4.083;
 const OSC_GAIN = 0.8;
 const VOICE_GAIN = 0.35;
 
@@ -53,7 +49,7 @@ class AnalogVoice implements EngineVoice {
   private readonly ladder: Filter;
   private readonly svf: Filter;
   private readonly diode: Filter;
-  private active_filter: Filter;
+  private activeFilter: Filter;
   private readonly ampEnv: Envelope;
   private readonly filterEnv: Envelope;
   private readonly cutoffSmooth: Smoother;
@@ -70,12 +66,16 @@ class AnalogVoice implements EngineVoice {
   private readonly driftInc = new Float64Array(MAX_UNISON);
   /** Detune positions per unison count, row-major: (count - 1) * 4 + slot. */
   private readonly spread = new Float64Array(MAX_UNISON * MAX_UNISON);
+  /** Oscillator sum for one control step, before filter and amplifier. */
+  private readonly mix = new Float64Array(CONTROL_STEP);
 
   private readonly invSr: number;
+  private readonly ctrlRate: number;
   private readonly maxFreq: number;
   private uni = 1;
   private uniGain = 1;
-  private subPhase = 0;
+  private readonly subPh = new Float64Array(1);
+  private readonly subTri = new Float64Array(1);
   private subInc = 0;
   private subRatio = 0.5;
   private detuneMul = 1;
@@ -92,13 +92,14 @@ class AnalogVoice implements EngineVoice {
 
   constructor(sampleRate: number) {
     this.invSr = 1 / sampleRate;
+    this.ctrlRate = sampleRate / CONTROL_STEP;
     this.maxFreq = sampleRate * 0.45;
     this.ladder = createFilter('ladder', sampleRate);
     this.svf = createFilter('svf', sampleRate);
     this.diode = createFilter('diode', sampleRate);
-    this.active_filter = this.ladder;
+    this.activeFilter = this.ladder;
     this.ampEnv = new Envelope(sampleRate);
-    this.filterEnv = new Envelope(sampleRate);
+    this.filterEnv = new Envelope(this.ctrlRate);
     // Smoother and LFO tick at control rate, so they are told that rate.
     this.cutoffSmooth = new Smoother(sampleRate / CONTROL_STEP, 8);
     this.lfo = new Lfo(sampleRate / CONTROL_STEP);
@@ -123,11 +124,12 @@ class AnalogVoice implements EngineVoice {
   }
 
   private applyEnvelopes(): void {
-    const a = this.params[P_ATTACK] as number;
-    const d = this.params[P_DECAY] as number;
-    const s = this.params[P_SUSTAIN] as number;
-    const r = this.params[P_RELEASE] as number;
+    const p = this.params;
+    const a = p[P_ATTACK] as number, d = p[P_DECAY] as number;
+    const s = p[P_SUSTAIN] as number, r = p[P_RELEASE] as number;
     this.ampEnv.set(a, d, s, r);
+    // The filter closes a little ahead of the amplitude and sits lower: a note
+    // that dulls as it fades is what an acoustic instrument does.
     this.filterEnv.set(a, d * 0.8, s * 0.5, r);
   }
 
@@ -145,8 +147,8 @@ class AnalogVoice implements EngineVoice {
     // A voice that has never sounded has nothing to glide from.
     if (!this.active || !(glideMs > 0)) this.logFreq = target;
     this.logTarget = target;
-    const steps = Math.max(1, (glideMs / 1000) * this.invSr === 0 ? 1 : (glideMs / 1000) / (this.invSr * CONTROL_STEP));
-    this.glideCoeff = glideMs > 0 ? 1 - Math.exp(-1 / (steps / 4)) : 1;
+    const steps = Math.max(1, (glideMs / 1000) * this.ctrlRate);
+    this.glideCoeff = glideMs > 0 ? 1 - Math.exp(-4 / steps) : 1;
 
     this.velocity = velocity > 0 ? (velocity < 1 ? velocity : 1) : 0;
     this.envK = ((p[P_CURVE] as number) - 0.5) * 1.6;
@@ -155,28 +157,24 @@ class AnalogVoice implements EngineVoice {
     this.uniGain = 1 / Math.sqrt(this.uni);
 
     for (let u = 0; u < MAX_UNISON; u++) {
-      // Staggered start phases: unison copies that begin together sound like
-      // one loud oscillator until they drift apart.
+      // Staggered starts: copies that begin in phase sound like one loud
+      // oscillator until they happen to drift apart.
       this.ph1[u] = ((voiceIndex * 0.137 + u * 0.618) % 1 + 1) % 1;
       this.ph2[u] = ((voiceIndex * 0.311 + u * 0.382) % 1 + 1) % 1;
-      this.tri1[u] = 0;
-      this.tri2[u] = 0;
+      this.tri1[u] = 0; this.tri2[u] = 0;
       this.driftPhase[u] = ((voiceIndex * 0.37 + u * 0.211) % 1 + 1) % 1;
       this.driftInc[u] = (0.11 + u * 0.041 + (voiceIndex % 4) * 0.017) * this.invSr * CONTROL_STEP;
     }
-    this.subPhase = 0;
-    this.noiseState = ((voiceIndex + 1) * 0x6d2b79f5) | 0;
-    if (this.noiseState === 0) this.noiseState = 0x9e3779b9 | 0;
+    this.subPh[0] = 0;
+    const seed = ((voiceIndex + 1) * 0x6d2b79f5) | 0;
+    this.noiseState = seed === 0 ? 0x9e3779b9 | 0 : seed;
 
-    this.ladder.reset();
-    this.svf.reset();
-    this.diode.reset();
+    this.ladder.reset(); this.svf.reset(); this.diode.reset();
     this.applyEnvelopes();
     this.applyLfo();
     this.lfo.seed(voiceIndex);
     this.lfo.trigger((p[P_LFO_SYNC] as number) >= 0.5);
-    this.ampEnv.trigger();
-    this.filterEnv.trigger();
+    this.ampEnv.trigger(); this.filterEnv.trigger();
     this.cutoffSmooth.snap(p[P_CUTOFF] as number);
     this.ctrl = 0;
     this.active = true;
@@ -187,58 +185,9 @@ class AnalogVoice implements EngineVoice {
     this.filterEnv.release();
   }
 
-  /**
-   * True only once a note has been triggered and its amp envelope has run out.
-   * A freshly allocated voice reports false; VoiceManager only asks about
-   * slots it has marked busy, so that is correct but worth knowing.
-   */
+  /** True once a note has been triggered and its amp envelope has run out. */
   isFinished(): boolean {
     return this.active && this.ampEnv.isFinished();
-  }
-
-  /** One antialiased oscillator sample; `tri` carries the integrator state. */
-  private oscSample(
-    shape: number, ph: Float64Array, tri: Float64Array,
-    u: number, inc: number, pw: number,
-  ): number {
-    let p = (ph[u] as number) + inc;
-    if (p >= 1) p -= 1;
-    ph[u] = p;
-    if (shape <= 0) return 2 * p - 1 - blep(p, inc);
-    if (shape >= 3) return Math.sin(p * TWO_PI);
-    // A pulse is two BLEP-corrected saws offset by the width; the offset
-    // cancels the DC exactly, so no correction term is needed.
-    const w = shape === 1 ? pw : 0.5;
-    let q = p + w;
-    if (q >= 1) q -= 1;
-    const sq = (2 * p - 1 - blep(p, inc)) - (2 * q - 1 - blep(q, inc));
-    if (shape === 1) return sq;
-    // Triangle: leaky-integrate the square. Integration rolls off whatever
-    // aliasing survived the square by another 6 dB per octave for free.
-    let t = (tri[u] as number) * (1 - inc) + inc * sq;
-    if (t < DENORMAL && t > -DENORMAL) t = 0;
-    tri[u] = t;
-    return t * TRI_SCALE;
-  }
-
-  private subSample(sine: boolean): number {
-    let p = this.subPhase + this.subInc;
-    if (p >= 1) p -= 1;
-    this.subPhase = p;
-    if (sine) return Math.sin(p * TWO_PI);
-    let q = p + 0.5;
-    if (q >= 1) q -= 1;
-    return (2 * p - 1 - blep(p, this.subInc)) - (2 * q - 1 - blep(q, this.subInc));
-  }
-
-  /** Seeded xorshift32 — deterministic per voice, unlike Math.random. */
-  private noise(): number {
-    let s = this.noiseState;
-    s ^= s << 13; s |= 0;
-    s ^= s >>> 17;
-    s ^= s << 5; s |= 0;
-    this.noiseState = s;
-    return (s >>> 0) / 2147483648 - 1;
   }
 
   /** Everything that moves slower than audio, recomputed once per control step. */
@@ -266,9 +215,7 @@ class AnalogVoice implements EngineVoice {
     const fs = base * this.subRatio;
     this.subInc = (fs > max ? max : fs < 0.01 ? 0.01 : fs) * this.invSr;
 
-    let fenv = 0;
-    for (let s = 0; s < CONTROL_STEP; s++) fenv = this.filterEnv.next();
-    fenv = bend(fenv, this.envK);
+    const fenv = bend(this.filterEnv.next(), this.envK);
     // Key track, velocity and LFO are all pitch-like: sum them in octaves and
     // pay for exactly one exp().
     const oct = (p[P_KEYTRACK] as number) * (this.logFreq - LOG2_REF)
@@ -278,7 +225,7 @@ class AnalogVoice implements EngineVoice {
       * (1 + (p[P_FILTER_ENV] as number) * fenv * 6);
     if (!(cut > 10)) cut = 10;
     else if (cut > max) cut = max;
-    this.active_filter.setCutoff(cut);
+    this.activeFilter.setCutoff(cut);
 
     const w = (p[P_PW] as number) + (p[P_LFO_PW] as number) * lfoV * 0.45;
     this.pw = w < 0.06 ? 0.06 : w > 0.94 ? 0.94 : w;
@@ -290,21 +237,18 @@ class AnalogVoice implements EngineVoice {
     const p = this.params;
     const model = Math.round(p[P_MODEL] as number);
     const filter = model === 1 ? this.svf : model === 2 ? this.diode : this.ladder;
-    this.active_filter = filter;
+    this.activeFilter = filter;
     filter.setResonance(p[P_RES] as number);
 
-    const drive = 1 + (p[P_DRIVE] as number) * 6;
-    const driveComp = 1 / Math.sqrt(drive);
-    const w1 = Math.round(p[P_WAVE1] as number);
-    const w2 = Math.round(p[P_WAVE2] as number);
-    const mix = (p[P_MIX] as number) < 0 ? 0 : (p[P_MIX] as number) > 1 ? 1 : (p[P_MIX] as number);
-    const g1 = (1 - mix) * OSC_GAIN;
-    const g2 = mix * OSC_GAIN;
+    const drive = 1 + (p[P_DRIVE] as number) * 6, driveComp = 1 / Math.sqrt(drive);
+    const w1 = Math.round(p[P_WAVE1] as number), w2 = Math.round(p[P_WAVE2] as number);
+    const raw = p[P_MIX] as number;
+    const bal = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+    const g1 = (1 - bal) * OSC_GAIN * this.uniGain, g2 = bal * OSC_GAIN * this.uniGain;
     const subMode = Math.round(p[P_SUB_MODE] as number);
-    const subSine = subMode >= 2;
+    const subShape = subMode >= 2 ? WAVE_SINE : WAVE_PULSE;
     const subLevel = (p[P_SUB_LEVEL] as number) * 0.9;
-    const noiseLevel = (p[P_NOISE] as number) * 0.5;
-    const velAmp = p[P_VEL_AMP] as number;
+    const noiseLevel = (p[P_NOISE] as number) * 0.5, velAmp = p[P_VEL_AMP] as number;
     const gain = (1 - velAmp + velAmp * this.velocity * this.velocity) * VOICE_GAIN;
     const n = this.uni;
     const k = this.envK;
@@ -312,29 +256,41 @@ class AnalogVoice implements EngineVoice {
     this.subRatio = (subMode & 1) === 1 ? 0.25 : 0.5;
     this.cutoffSmooth.setTarget(p[P_CUTOFF] as number);
 
-    for (let i = 0; i < count; i++) {
-      if (this.ctrl === 0) {
-        this.updateControl();
-        this.ctrl = CONTROL_STEP;
-      }
-      this.ctrl--;
-
+    const mix = this.mix;
+    let noise = this.noiseState;
+    let i = 0;
+    while (i < count) {
+      if (this.ctrl === 0) { this.updateControl(); this.ctrl = CONTROL_STEP; }
+      const m = this.ctrl < count - i ? this.ctrl : count - i;
       const pw = this.pw;
-      let sig = 0;
+      for (let j = 0; j < m; j++) mix[j] = 0;
       for (let u = 0; u < n; u++) {
-        sig += this.oscSample(w1, this.ph1, this.tri1, u, this.inc1[u] as number, pw) * g1;
-        sig += this.oscSample(w2, this.ph2, this.tri2, u, this.inc2[u] as number, pw) * g2;
+        addOsc(w1, mix, m, this.ph1, this.tri1, u, this.inc1[u] as number, pw, g1);
+        addOsc(w2, mix, m, this.ph2, this.tri2, u, this.inc2[u] as number, pw, g2);
       }
-      sig *= this.uniGain;
-      if (subLevel > 0) sig += this.subSample(subSine) * subLevel;
-      if (noiseLevel > 0) sig += this.noise() * noiseLevel;
-      sig = saturate(sig * drive) * driveComp;
+      if (subLevel > 0) {
+        addOsc(subShape, mix, m, this.subPh, this.subTri, 0, this.subInc, 0.5, subLevel);
+      }
+      const amp = gain * this.ampMod;
 
-      let y = filter.process(sig) * bend(this.ampEnv.next(), k) * gain * this.ampMod;
-      // Catches NaN and infinity alike: a failed comparison falls to zero.
-      if (!(y > -4 && y < 4)) y = y > 0 ? 4 : y < 0 ? -4 : 0;
-      out[offset + i] = (out[offset + i] as number) + y;
+      for (let j = 0; j < m; j++) {
+        let sig = mix[j] as number;
+        if (noiseLevel > 0) {
+          noise ^= noise << 13; noise |= 0;
+          noise ^= noise >>> 17;
+          noise ^= noise << 5; noise |= 0;
+          sig += ((noise >>> 0) / 2147483648 - 1) * noiseLevel;
+        }
+        sig = saturate(sig * drive) * driveComp;
+        const e = this.ampEnv.next();
+        let y = filter.process(sig) * (k === 0 ? e : bend(e, k)) * amp;
+        // Catches NaN and infinity alike: a failed comparison falls to zero.
+        if (!(y > -4 && y < 4)) y = y > 0 ? 4 : y < 0 ? -4 : 0;
+        out[offset + i + j] = (out[offset + i + j] as number) + y;
+      }
+      i += m; this.ctrl -= m;
     }
+    this.noiseState = noise;
   }
 }
 
