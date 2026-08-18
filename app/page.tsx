@@ -819,13 +819,16 @@ export default function Page(): JSX.Element {
           </button>
         </div>
 
-        {!songScope && (
-          <LoopStrip
-            seq={{ ...song.seq, toggleRecord: song.toggleRecord }}
-            targetLabel={song.targetLabel}
-            colour={colour}
-          />
-        )}
+        {/*
+          No loop strip in SOUND scope.
+
+          It records into a cell of the song, which is a SONG idea — in SOUND
+          scope there is no cell on screen to record into, so REC, the bar
+          count and the target label were all referring to something invisible.
+          It also put two controls labelled UNDO on screen at once: this one
+          strips a take, the patch undo beside the tabs steps a sound. Same
+          word, two meanings, an arm's length apart.
+        */}
         {!songScope && playSurface}
       </footer>
 
