@@ -9,7 +9,8 @@
     "start": "next start",
     "build:worklet": "node scripts/build-worklet.mjs",
     "test": "NODE_OPTIONS=--expose-gc vitest run",
-    "test:watch": "NODE_OPTIONS=--expose-gc vitest"
+    "test:watch": "NODE_OPTIONS=--expose-gc vitest",
+    "desktop": "node scripts/desktop.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
