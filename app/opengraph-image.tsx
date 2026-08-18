@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { ImageResponse } from 'next/og';
 
 export const alt = 'SIGIL — a sound design instrument';
@@ -29,7 +31,24 @@ const ENGINES: readonly (readonly [string, string])[] = [
 const INK = '#F5F1E6';
 const BG = '#0E0E0E';
 
-export default function OpengraphImage(): ImageResponse {
+/**
+ * Satori cannot read the woff2 that next/font emits, and with no usable face it
+ * silently falls back to a default — which renders the wordmark thin and makes
+ * the card look like a different product. The TTFs are vendored under
+ * assets/fonts (SIL Open Font License, see OFL.txt) and traced into the deploy
+ * by next.config.mjs.
+ */
+async function face(file: string): Promise<ArrayBuffer> {
+  const buf = await readFile(join(process.cwd(), 'assets', 'fonts', file));
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+}
+
+export default async function OpengraphImage(): Promise<ImageResponse> {
+  const [bold, regular] = await Promise.all([
+    face('SpaceGrotesk-Bold.ttf'),
+    face('SpaceGrotesk-Regular.ttf'),
+  ]);
+
   return new ImageResponse(
     (
       <div
@@ -41,6 +60,7 @@ export default function OpengraphImage(): ImageResponse {
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: 64,
+          fontFamily: 'Space Grotesk',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 40 }}>
@@ -141,6 +161,12 @@ export default function OpengraphImage(): ImageResponse {
         </div>
       </div>
     ),
-    size,
+    {
+      ...size,
+      fonts: [
+        { name: 'Space Grotesk', data: bold, weight: 700, style: 'normal' },
+        { name: 'Space Grotesk', data: regular, weight: 400, style: 'normal' },
+      ],
+    },
   );
 }

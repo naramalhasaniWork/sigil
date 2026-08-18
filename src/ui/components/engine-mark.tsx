@@ -74,16 +74,61 @@ export function EngineMark({ engineId, colour, size = 22 }: MarkProps): JSX.Elem
  * spectrum, and a diagonal that cuts the whole form so it never resolves into a
  * letter. Asymmetric on purpose — symmetry would make it a logo, not a mark.
  */
-export function SigilMark({ size = 22 }: { size?: number }): JSX.Element {
+export function SigilMark({
+  size = 22,
+  animate = false,
+}: {
+  size?: number;
+  /**
+   * Play the build-in gesture. Off by default and deliberately so: the header
+   * mark sits inches from the meters and the engine name, and a logo that moves
+   * while someone is playing competes with the readouts that actually carry
+   * information. Turn it on where the mark is the subject.
+   */
+  animate?: boolean;
+}): JSX.Element {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={animate ? 'sigil-anim' : undefined}
+    >
+      {/* The stem: the fundamental everything else is measured from. */}
+      <path
+        className="sigil-stem"
+        d="M4 2 L4 22"
+        stroke="var(--ink)"
+        strokeWidth="2.6"
+        strokeLinecap="square"
+        fill="none"
+      />
+      {/*
+        Four partials whose lengths fall by roughly two thirds each — the decay
+        an actual harmonic series has. The previous three were evenly chosen by
+        eye and read as a generic "E"; the exponential fall reads as a spectrum,
+        which is what the instrument is for.
+      */}
       <g stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="square" fill="none">
-        <path d="M4 2 L4 22" />
-        <path d="M4 5.5 L20 5.5" />
-        <path d="M4 12 L14.5 12" />
-        <path d="M4 18.5 L9.5 18.5" />
+        <path className="sigil-tine" d="M4 5.5 L21 5.5" />
+        <path className="sigil-tine" d="M4 10 L15.5 10" />
+        <path className="sigil-tine" d="M4 14.5 L11.5 14.5" />
+        <path className="sigil-tine" d="M4 19 L9 19" />
       </g>
-      <path d="M17 2.5 L10 21.5" stroke="var(--analog)" strokeWidth="2.6" strokeLinecap="square" fill="none" />
+      {/*
+        The sweep. Crosses every partial at a slant so the mark can never settle
+        into a letterform, and cuts them at descending points the way a lowpass
+        takes the top of a spectrum off first.
+      */}
+      <path
+        className="sigil-sweep"
+        d="M18.5 2.5 L9 21.5"
+        stroke="var(--analog)"
+        strokeWidth="2.6"
+        strokeLinecap="square"
+        fill="none"
+      />
     </svg>
   );
 }

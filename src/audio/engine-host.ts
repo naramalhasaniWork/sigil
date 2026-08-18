@@ -17,7 +17,8 @@ export class EngineHost {
   private node: AudioWorkletNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   /** Resolver for the in-flight capture, settled when the worklet posts back. */
-  private capturePending: ((r: CaptureResult) => void) | null = null;
+  /** Resolves with null when a capture is abandoned — see dispose(). */
+  private capturePending: ((r: CaptureResult | null) => void) | null = null;
   private capturingFlag = false;
 
   /** Exposed so sample decoding can reuse the live context instead of opening another. */
@@ -35,6 +36,48 @@ export class EngineHost {
 
   get sampleRate(): number {
     return this.ctx?.sampleRate ?? 48000;
+  }
+
+  /**
+   * Tear the whole graph down and release the audio device.
+   *
+   * Without this, every remount of the controlling hook built a SECOND
+   * AudioWorkletNode onto the same destination while the first kept running.
+   * Two engines summing into one output comb-filter each other, which does not
+   * sound like a crash — it sounds like the instrument lost its clarity, and
+   * Panic cannot clear it because Panic only reaches the host the UI is
+   * currently holding. In development, editing this hook was enough to trigger
+   * it; a plugin host that instantiates and destroys editors would hit the same
+   * thing.
+   *
+   * Safe to call twice, and safe to call before start().
+   */
+  async dispose(): Promise<void> {
+    // Silence first: releasing voices before the graph goes away avoids a
+    // buffer of half-finished notes being cut mid-cycle, which clicks.
+    this.node?.port.postMessage({ type: 'allNotesOff' });
+
+    // A pending capture will never resolve once the node is gone. Settle it
+    // rather than leaving an await hanging forever.
+    const pending = this.capturePending;
+    this.capturePending = null;
+    this.capturingFlag = false;
+    pending?.(null);
+
+    if (this.node !== null) {
+      this.node.port.onmessage = null;
+      this.node.port.close();
+      this.node.disconnect();
+    }
+    this.analyserNode?.disconnect();
+
+    const ctx = this.ctx;
+    this.node = null;
+    this.analyserNode = null;
+    this.ctx = null;
+    // Closing releases the hardware device; browsers cap how many contexts a
+    // page may hold, so leaking them eventually fails to start audio at all.
+    if (ctx !== null && ctx.state !== 'closed') await ctx.close();
   }
 
   async start(): Promise<void> {
