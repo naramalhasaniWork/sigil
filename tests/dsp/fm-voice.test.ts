@@ -252,3 +252,49 @@ describe('FM macros are live in every algorithm', () => {
     });
   }
 });
+
+// Regression for the click review finding: balance and the op levels were
+// applied as raw block-rate gain steps, so every macro drag (balance IS
+// macro 0) stepped the gain at block boundaries -- measured jumps 10-12x
+// larger than the natural intra-block slew. Smoothed, the boundary jump
+// must sit within ~3x of the intra-block slew.
+describe('FM gain changes are click-free at block boundaries', () => {
+  const BLOCK = 128;
+
+  const boundaryVsIntra = (paramId: string, from: number, to: number) => {
+    const v = FmEngine.allocVoice(SR);
+    v.setParam(idx('algorithm'), 3);
+    v.setParam(idx('index'), 0);
+    v.setParam(idx('feedback'), 0);
+    v.setParam(idx('amp-sustain'), 1);
+    v.setParam(idx('mod-sustain'), 1);
+    v.setParam(idx(paramId), from);
+    v.noteOn(220, 1, 0);
+    const warm = new Float32Array(8192);
+    v.render(warm, 0, 8192);
+    const out = new Float32Array(BLOCK * 2);
+    v.render(out, 0, BLOCK);
+    v.setParam(idx(paramId), to);
+    v.render(out, BLOCK, BLOCK);
+    let intra = 0;
+    for (let i = 1; i < out.length; i++) {
+      if (i === BLOCK) continue; // the boundary pair is measured separately
+      const d = Math.abs((out[i] as number) - (out[i - 1] as number));
+      if (d > intra) intra = d;
+    }
+    const jump = Math.abs((out[BLOCK] as number) - (out[BLOCK - 1] as number));
+    return { jump, intra };
+  };
+
+  it('smooths a balance change across the block boundary', () => {
+    const { jump, intra } = boundaryVsIntra('balance', 0, 1);
+    expect(intra).toBeGreaterThan(0);
+    expect(jump).toBeLessThan(intra * 3);
+  });
+
+  it('smooths an operator level change across the block boundary', () => {
+    const { jump, intra } = boundaryVsIntra('op1-level', 0.2, 1);
+    expect(intra).toBeGreaterThan(0);
+    expect(jump).toBeLessThan(intra * 3);
+  });
+});

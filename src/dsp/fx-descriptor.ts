@@ -12,7 +12,7 @@ export const FX_DESCRIPTOR: EngineDescriptor = {
   params: [
     {
       id: 'drive-amount', name: 'Drive', group: 'Drive', unit: 'pct',
-      min: 0, max: 1, default: 0.2, curve: 'linear', macro: 2, macroDepth: 0.7,
+      min: 0, max: 1, default: 0, curve: 'linear', macro: 2, macroDepth: 0.7,
       mutability: 0.9,
       explain: 'Pushes the whole mix into soft saturation, rounding peaks off and adding harmonics that were never in the notes. Level is compensated, so this changes character and weight rather than loudness.',
     },
@@ -49,7 +49,7 @@ export const FX_DESCRIPTOR: EngineDescriptor = {
     },
     {
       id: 'chorus-mix', name: 'Chorus Mix', group: 'Chorus', unit: 'pct',
-      min: 0, max: 1, default: 0.2, curve: 'linear', mutability: 0.8,
+      min: 0, max: 1, default: 0, curve: 'linear', mutability: 0.8,
       explain: 'How much of the wobbling copies you hear against the original. At zero the chorus is bypassed exactly; past halfway the dry signal steps back and the sound starts to swim.',
     },
     {
@@ -74,7 +74,7 @@ export const FX_DESCRIPTOR: EngineDescriptor = {
     },
     {
       id: 'delay-mix', name: 'Delay Mix', group: 'Delay', unit: 'pct',
-      min: 0, max: 1, default: 0.22, curve: 'linear', macro: 3, macroDepth: 0.6,
+      min: 0, max: 1, default: 0, curve: 'linear', macro: 3, macroDepth: 0.6,
       mutability: 0.8,
       explain: 'How loud the repeats are against the dry sound. At zero the delay is bypassed exactly, which matters because a delay you cannot fully turn off will always muddy a tight patch.',
     },
@@ -100,7 +100,7 @@ export const FX_DESCRIPTOR: EngineDescriptor = {
     },
     {
       id: 'reverb-mix', name: 'Reverb Mix', group: 'Reverb', unit: 'pct',
-      min: 0, max: 1, default: 0.25, curve: 'linear', macro: 0, macroDepth: 0.7,
+      min: 0, max: 1, default: 0, curve: 'linear', macro: 0, macroDepth: 0.7,
       mutability: 0.8,
       explain: 'How much tail you hear against the dry sound. This is the single biggest difference between a patch that sounds like a demo and one that sounds like a record.',
     },
