@@ -1,10 +1,9 @@
 'use client';
 
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
 import { addressOf } from '@/audio/param-space';
 import { DevicePanel } from './device-panel';
-import { HandControlPanel } from './hand-control-panel';
 import { MidiPanel, type MappableParam } from './midi-panel';
 import { useMidiMap } from '@/ui/use-midi-map';
 import type { PadChordConfig } from '@/dsp/midi-chords';
@@ -22,8 +21,13 @@ interface SetupPanelProps {
   onNoteOn: (midi: number, velocity: number) => void;
   onNoteOff: (midi: number) => void;
   enabled: boolean;
-  /** Hand signals are modulation sources, patched onto the four macros. */
-  onHandReading: (x: number, y: number, pinch: number, spread: number) => void;
+  /**
+   * Left hand plays (pitch from height, pinch gates), right hand shapes the four
+   * macros. Either may be null when only one hand is in frame.
+   */
+  /** Lifted so the always-mounted camera panel knows when to show itself. */
+  section: SetupSection;
+  onSection: (next: SetupSection) => void;
   macroNames: readonly [string, string, string, string];
   kit: KitHandle;
   colour: string;
@@ -36,8 +40,8 @@ interface SetupPanelProps {
  * choice than the instrument needs — the things in here are all "set something
  * up once", so they share one door and one row of sub-tabs.
  */
-const SECTIONS = ['kit', 'hardware', 'controllers', 'camera'] as const;
-type Section = (typeof SECTIONS)[number];
+export const SETUP_SECTIONS = ['kit', 'hardware', 'controllers', 'camera'] as const;
+export type SetupSection = (typeof SETUP_SECTIONS)[number];
 
 /**
  * Everything about talking to the outside world: hardware, controllers and the
@@ -47,9 +51,8 @@ type Section = (typeof SECTIONS)[number];
 export function SetupPanel({
   audioContext, engineDescriptor, fxDescriptor, magicDescriptor,
   padChords, onPadChords, onParam, onNoteOn, onNoteOff, enabled,
-  onHandReading, macroNames, kit, colour, bouncing, onRenderForKit,
+  macroNames, kit, colour, bouncing, onRenderForKit, section, onSection,
 }: SetupPanelProps): JSX.Element {
-  const [section, setSection] = useState<Section>('kit');
   /** Every parameter a controller knob can be learned onto, across the chain. */
   const mappable = useMemo<MappableParam[]>(() => {
     const out: MappableParam[] = [];
@@ -80,14 +83,14 @@ export function SetupPanel({
   return (
     <div className="flex flex-col gap-5 max-w-5xl">
       <div className="flex flex-wrap gap-1.5">
-        {SECTIONS.map((name) => {
+        {SETUP_SECTIONS.map((name) => {
           const active = section === name;
           return (
             <button
               key={name}
               type="button"
               aria-pressed={active}
-              onClick={(): void => setSection(name)}
+              onClick={(): void => onSection(name)}
               className="border-[3px] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
               style={{
                 borderColor: active ? colour : 'var(--muted)',
@@ -122,17 +125,8 @@ export function SetupPanel({
         />
       )}
 
-      {section === 'camera' && (
-        <HandControlPanel
-          onReading={onHandReading}
-          targets={{
-            x: macroNames[1],
-            y: macroNames[0],
-            pinch: macroNames[2],
-            spread: macroNames[3],
-          }}
-        />
-      )}
+      {/* The camera panel is mounted by the page, not here: unmounting it would
+          stop the camera every time you changed tabs. */}
     </div>
   );
 }

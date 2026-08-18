@@ -1,11 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
-import { useHandControl } from '@/ui/use-hand-control';
+import { useHandControl, type HandReading } from '@/ui/use-hand-control';
 
 interface HandControlPanelProps {
-  /** Called ~30 times a second while a hand is visible. Modulation only. */
-  onReading: (x: number, y: number, pinch: number, spread: number) => void;
+  /**
+   * Called ~30 times a second with both hands. Either may be null when only one
+   * is visible. Roles come from screen position: leftmost hand is `left`.
+   */
+  onHands: (left: HandReading | null, right: HandReading | null) => void;
   /** What each signal is patched to, shown next to the bars. */
   targets?: { x: string; y: string; pinch: string; spread: string };
 }
@@ -53,20 +56,18 @@ function Bar({ label, target, value, colour }: {
  * Camera hand tracking as a modulation source. The camera is off until the
  * button below is pressed, and every frame is discarded after it is measured.
  */
-export function HandControlPanel({ onReading, targets }: HandControlPanelProps): JSX.Element {
+export function HandControlPanel({ onHands, targets }: HandControlPanelProps): JSX.Element {
   const [enabled, setEnabled] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const handleReading = useCallback(
-    (x: number, y: number, pinch: number, spread: number): void => {
-      onReading(x, y, pinch, spread);
-    },
-    [onReading],
+  const handleHands = useCallback(
+    (l: HandReading | null, r: HandReading | null): void => { onHands(l, r); },
+    [onHands],
   );
 
-  const { supported, active, error, reading, videoRef, frameRef } = useHandControl({
+  const { supported, active, error, left, right, videoRef, framesRef } = useHandControl({
     enabled,
-    onReading: handleReading,
+    onHands: handleHands,
   });
 
   // Landmark overlay. Drawn from the hook's preallocated buffer, mirrored to
@@ -90,41 +91,50 @@ export function HandControlPanel({ onReading, targets }: HandControlPanelProps):
     const draw = (): void => {
       handle = window.requestAnimationFrame(draw);
       ctx.clearRect(0, 0, PREVIEW_W, PREVIEW_H);
-      const frame = frameRef.current;
-      if (!frame.present) return;
-      const pts = frame.points;
+      // Left hand plays, right hand shapes — drawn in different inks so the
+      // roles are obvious before you move a finger.
+      for (const role of ['left', 'right'] as const) {
+        const frame = framesRef.current[role];
+        if (!frame.present) continue;
+        const pts = frame.points;
 
-      ctx.strokeStyle = INK;
-      ctx.beginPath();
-      for (let i = 0; i < BONES.length; i += 1) {
-        const bone = BONES[i];
-        if (bone === undefined) continue;
-        const ax = (1 - (pts[bone[0] * 2] ?? 0)) * PREVIEW_W;
-        const ay = (pts[bone[0] * 2 + 1] ?? 0) * PREVIEW_H;
-        const bx = (1 - (pts[bone[1] * 2] ?? 0)) * PREVIEW_W;
-        const by = (pts[bone[1] * 2 + 1] ?? 0) * PREVIEW_H;
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-      }
-      ctx.stroke();
+        ctx.strokeStyle = role === 'left' ? '#FF6B6B' : INK;
+        ctx.beginPath();
+        for (let i = 0; i < BONES.length; i += 1) {
+          const bone = BONES[i];
+          if (bone === undefined) continue;
+          const ax = (1 - (pts[bone[0] * 2] ?? 0)) * PREVIEW_W;
+          const ay = (pts[bone[0] * 2 + 1] ?? 0) * PREVIEW_H;
+          const bx = (1 - (pts[bone[1] * 2] ?? 0)) * PREVIEW_W;
+          const by = (pts[bone[1] * 2 + 1] ?? 0) * PREVIEW_H;
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+        }
+        ctx.stroke();
 
-      ctx.fillStyle = ANALOG;
-      for (let i = 0; i < TIPS.length; i += 1) {
-        const idx = TIPS[i];
-        if (idx === undefined) continue;
-        const x = (1 - (pts[idx * 2] ?? 0)) * PREVIEW_W;
-        const y = (pts[idx * 2 + 1] ?? 0) * PREVIEW_H;
-        ctx.fillRect(x - 3, y - 3, 6, 6);
+        ctx.fillStyle = role === 'left' ? '#FF6B6B' : ANALOG;
+        for (let i = 0; i < TIPS.length; i += 1) {
+          const idx = TIPS[i];
+          if (idx === undefined) continue;
+          const tx = (1 - (pts[idx * 2] ?? 0)) * PREVIEW_W;
+          const ty = (pts[idx * 2 + 1] ?? 0) * PREVIEW_H;
+          ctx.fillRect(tx - 3, ty - 3, 6, 6);
+        }
       }
     };
     handle = window.requestAnimationFrame(draw);
     return (): void => window.cancelAnimationFrame(handle);
-  }, [active, frameRef]);
+  }, [active, framesRef]);
 
-  const r = reading;
+  // The right hand shapes sound, so its readings drive the bars; the left hand
+  // is a player and is reported by presence rather than by value.
+  const r = right;
+  const hands = (left === null ? 0 : 1) + (right === null ? 0 : 1);
   const status = !enabled
     ? 'CAMERA OFF'
-    : active ? (r === null ? 'NO HAND' : 'TRACKING') : error !== null ? 'STOPPED' : 'STARTING';
+    : active
+      ? (hands === 0 ? 'NO HANDS' : hands === 1 ? '1 HAND' : '2 HANDS')
+      : error !== null ? 'STOPPED' : 'STARTING';
 
   return (
     <section

@@ -44,5 +44,8 @@ body {
   --panel: #1D0B12;
   --ink: #FFE9D6;
   --analog: #FF2D55;
+  /* The class sits on <main>, a DESCENDANT of body, so a `.sigil-ritual body`
+     rule could never match and the page ground stayed unchanged — the theme
+     applied to everything except the largest surface. main paints itself. */
+  background: var(--bg);
 }
-.sigil-ritual body { background: var(--bg); }

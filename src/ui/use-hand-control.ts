@@ -3,17 +3,31 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Smoother } from '@/dsp/smoothing';
 
+export interface HandReading {
+  x: number;
+  y: number;
+  pinch: number;
+  spread: number;
+}
+
 export interface HandControlState {
   supported: boolean;
   active: boolean;
   error: string | null;
-  /** null when no hand is visible */
-  reading: { x: number; y: number; pinch: number; spread: number } | null;
+  /**
+   * Roles are assigned by SCREEN POSITION, not MediaPipe's handedness label.
+   * Handedness is computed on the un-mirrored image, so in a selfie view its
+   * "Left" is the user's right hand — a reliable source of inverted-control
+   * bugs. Leftmost hand on the mirrored preview is `left`, full stop: what you
+   * see is what you get.
+   */
+  left: HandReading | null;
+  right: HandReading | null;
 }
 
 export interface HandControlOptions {
   enabled: boolean;
-  onReading: (x: number, y: number, pinch: number, spread: number) => void;
+  onHands: (left: HandReading | null, right: HandReading | null) => void;
 }
 
 /**
@@ -23,6 +37,12 @@ export interface HandControlOptions {
 export interface HandFrame {
   readonly points: Float32Array;
   present: boolean;
+}
+
+/** Both hands' landmark frames, so the overlay can draw each one. */
+export interface HandFrames {
+  readonly left: HandFrame;
+  readonly right: HandFrame;
 }
 
 /**
@@ -149,7 +169,7 @@ async function loadLandmarker(): Promise<HandLandmarkerLike> {
   const vision = loaded as VisionModule;
   const fileset = await vision.FilesetResolver.forVisionTasks(WASM_ROOT);
   const options: LandmarkerOptions = {
-    baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 1,
+    baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2,
   };
   try {
     return await vision.HandLandmarker.createFromOptions(fileset, options);
@@ -170,22 +190,32 @@ async function loadLandmarker(): Promise<HandLandmarkerLike> {
 export function useHandControl(opts: HandControlOptions): HandControlState & {
   videoRef: RefObject<HTMLVideoElement | null>;
   frameRef: RefObject<HandFrame>;
+  framesRef: RefObject<HandFrames>;
 } {
   const [supported, setSupported] = useState(false);
   const [active, setActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reading, setReading] = useState<HandControlState['reading']>(null);
+  const [left, setLeft] = useState<HandReading | null>(null);
+  const [right, setRight] = useState<HandReading | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HandFrame>({ points: new Float32Array(LANDMARK_COUNT * 2), present: false });
+  const framesRef = useRef<HandFrames>({
+    left: { points: new Float32Array(LANDMARK_COUNT * 2), present: false },
+    right: { points: new Float32Array(LANDMARK_COUNT * 2), present: false },
+  });
   const rawRef = useRef<Float32Array>(new Float32Array(4));
-  const onReadingRef = useRef(opts.onReading);
-  onReadingRef.current = opts.onReading;
-  const smoothersRef = useRef<Smoothers | null>(null);
-  smoothersRef.current ??= {
+  const onHandsRef = useRef(opts.onHands);
+  onHandsRef.current = opts.onHands;
+
+  const makeSmoothers = (): Smoothers => ({
     x: new Smoother(FRAME_RATE, POSITION_MS), y: new Smoother(FRAME_RATE, POSITION_MS),
     pinch: new Smoother(FRAME_RATE, SHAPE_MS), spread: new Smoother(FRAME_RATE, SHAPE_MS),
-  };
+  });
+  // One set per role. Sharing smoothers between hands would make each hand drag
+  // the other's values toward it whenever they crossed.
+  const smoothersRef = useRef<{ left: Smoothers; right: Smoothers } | null>(null);
+  smoothersRef.current ??= { left: makeSmoothers(), right: makeSmoothers() };
   const enabled = opts.enabled;
 
   useEffect(() => {
@@ -208,7 +238,7 @@ export function useHandControl(opts: HandControlOptions): HandControlState & {
     let stream: MediaStream | null = null;
     let landmarker: HandLandmarkerLike | null = null;
     let rafHandle = 0, vfcHandle = 0, lastTs = 0, lastPublish = 0;
-    let hadHand = false;
+    const hadHand: { left: boolean; right: boolean } = { left: false, right: false };
     const host = video as HTMLVideoElement & FrameCallbackHost;
     const requestFrame = host.requestVideoFrameCallback;
     const schedule = (): void => {
@@ -233,31 +263,65 @@ export function useHandControl(opts: HandControlOptions): HandControlState & {
         return;
       }
 
-      const hand = result.landmarks.length > 0 ? result.landmarks[0] : undefined;
-      if (hand === undefined || hand.length < LANDMARK_COUNT) {
-        frame.present = false;
-        if (hadHand) { hadHand = false; setReading(null); }
-        return;
+      /*
+       * Assign roles by horizontal position on the MIRRORED preview: the hand
+       * the user sees on the left is the left role. Deliberately not using
+       * MediaPipe handedness, which is computed on the un-mirrored image and
+       * therefore reports the opposite of what a selfie view shows.
+       */
+      const detected: Array<{ points: readonly Landmark[]; cx: number }> = [];
+      for (const hand of result.landmarks) {
+        if (hand.length < LANDMARK_COUNT) continue;
+        let sum = 0;
+        for (const idx of PALM_POINTS) sum += hand[idx]?.x ?? 0;
+        detected.push({ points: hand, cx: sum / PALM_POINTS.length });
       }
-      for (let i = 0; i < LANDMARK_COUNT; i += 1) {
-        const p = hand[i];
-        if (p === undefined) return;
-        frame.points[i * 2] = p.x;
-        frame.points[i * 2 + 1] = p.y;
-      }
-      frame.present = true;
-      if (!measure(frame.points, video.videoWidth / video.videoHeight, raw)) return;
+      // Mirrored, so a larger raw x sits further LEFT on screen.
+      detected.sort((a, b) => b.cx - a.cx);
 
-      const fresh = !hadHand;
-      hadHand = true;
-      const x = smooth(smoothers.x, raw[0] ?? 0, fresh);
-      const y = smooth(smoothers.y, raw[1] ?? 0, fresh);
-      const pinch = smooth(smoothers.pinch, raw[2] ?? 0, fresh);
-      const spread = smooth(smoothers.spread, raw[3] ?? 0, fresh);
-      onReadingRef.current(x, y, pinch, spread);
+      const roles = ['left', 'right'] as const;
+      const next: { left: HandReading | null; right: HandReading | null } = {
+        left: null, right: null,
+      };
+
+      for (let r = 0; r < roles.length; r++) {
+        const role = roles[r] as 'left' | 'right';
+        const frameForRole = framesRef.current[role];
+        const found = detected[r];
+        if (found === undefined) {
+          frameForRole.present = false;
+          hadHand[role] = false;
+          continue;
+        }
+        for (let i = 0; i < LANDMARK_COUNT; i += 1) {
+          const pt = found.points[i];
+          if (pt === undefined) break;
+          frameForRole.points[i * 2] = pt.x;
+          frameForRole.points[i * 2 + 1] = pt.y;
+        }
+        frameForRole.present = true;
+        if (!measure(frameForRole.points, video.videoWidth / video.videoHeight, raw)) continue;
+
+        const fresh = !hadHand[role];
+        hadHand[role] = true;
+        const sm = smoothers[role];
+        next[role] = {
+          x: smooth(sm.x, raw[0] ?? 0, fresh),
+          y: smooth(sm.y, raw[1] ?? 0, fresh),
+          pinch: smooth(sm.pinch, raw[2] ?? 0, fresh),
+          spread: smooth(sm.spread, raw[3] ?? 0, fresh),
+        };
+      }
+
+      // The single-hand frame stays in step for any overlay still reading it.
+      frame.present = framesRef.current.left.present;
+      if (frame.present) frame.points.set(framesRef.current.left.points);
+
+      onHandsRef.current(next.left, next.right);
       if (ts - lastPublish >= PUBLISH_MS) {
         lastPublish = ts;
-        setReading({ x, y, pinch, spread });
+        setLeft(next.left);
+        setRight(next.right);
       }
     };
 
@@ -299,9 +363,10 @@ export function useHandControl(opts: HandControlOptions): HandControlState & {
       landmarker = null;
       frame.present = false;
       setActive(false);
-      setReading(null);
+      setLeft(null);
+      setRight(null);
     };
   }, [enabled]);
 
-  return { supported, active, error, reading, videoRef, frameRef };
+  return { supported, active, error, left, right, videoRef, frameRef, framesRef };
 }

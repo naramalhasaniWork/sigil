@@ -12,8 +12,11 @@ import { ExportTray } from '@/ui/components/export-tray';
 import { useDragExport } from '@/ui/use-drag-export';
 import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
 import { useChordInput } from '@/ui/use-chord-input';
-import { SetupPanel } from '@/ui/components/setup-panel';
+import { SetupPanel, type SetupSection } from '@/ui/components/setup-panel';
+import { HandControlPanel } from '@/ui/components/hand-control-panel';
 import { useKit } from '@/ui/use-kit';
+import { useHandPlay } from '@/ui/use-hand-play';
+import type { HandReading } from '@/ui/use-hand-control';
 import { DEFAULT_PAD_CHORDS } from '@/dsp/midi-chords';
 import { MacroRow } from '@/ui/components/macro-row';
 import { XYPad } from '@/ui/components/xy-pad';
@@ -37,6 +40,8 @@ export default function Page(): JSX.Element {
   const colour = inst.descriptor?.colour ?? '#FF6B6B';
   const tray = useDragExport();
   const kit = useKit();
+  const [setupSection, setSetupSection] = useState<SetupSection>('kit');
+  const showCamera = view === 'setup' && setupSection === 'camera';
 
   const eggs = useEasterEggs({
     onReveal: (_id, label): void => inst.setStatus(label),
@@ -74,6 +79,30 @@ export default function Page(): JSX.Element {
     onNoteOn: inst.noteOn,
     onNoteOff: inst.noteOff,
   });
+
+  /*
+   * Left hand plays through the SAME chord layer as the keys, so switching to
+   * Chords means a pinch sounds a whole diatonic chord — which is what makes
+   * progressions playable by hand.
+   */
+  const handPlay = useHandPlay({
+    enabled: inst.started,
+    root: scaleState.root,
+    scale: scaleState.scale,
+    baseOctave: octave,
+    onNoteOn: chordInput.noteOn,
+    onNoteOff: chordInput.noteOff,
+  });
+
+  const onHands = useCallback((left: HandReading | null, right: HandReading | null): void => {
+    handPlay.update(left);
+    if (right !== null) {
+      inst.setMacro(1, right.x);
+      inst.setMacro(0, right.y);
+      inst.setMacro(2, right.pinch);
+      inst.setMacro(3, right.spread);
+    }
+  }, [handPlay, inst]);
 
   useComputerKeyboard({
     onNoteOn: chordInput.noteOn,
@@ -239,12 +268,8 @@ export default function Page(): JSX.Element {
                 onNoteOn={chordInput.noteOn}
                 onNoteOff={chordInput.noteOff}
                 enabled={inst.started}
-                onHandReading={(x, y, pinch, spread): void => {
-                  inst.setMacro(1, x);
-                  inst.setMacro(0, y);
-                  inst.setMacro(2, pinch);
-                  inst.setMacro(3, spread);
-                }}
+                section={setupSection}
+                onSection={setSetupSection}
                 macroNames={inst.macroNames}
                 kit={kit}
                 colour={colour}
@@ -382,6 +407,35 @@ export default function Page(): JSX.Element {
         )}
 
       </footer>
+
+      {/*
+        * Mounted for the whole session and merely HIDDEN when you are elsewhere.
+        * Unmounting it would tear down the camera stream and the tracking loop,
+        * so hand tracking now stays on until you turn it off.
+        */}
+      <div
+        className={showCamera ? 'px-4 pb-6' : undefined}
+        aria-hidden={!showCamera}
+        /*
+         * Parked off-screen rather than display:none. A hidden <video> can stop
+         * receiving frame callbacks, which would silently pause tracking while
+         * looking like it was still on — worse than stopping it outright.
+         */
+        style={showCamera ? undefined : {
+          position: 'fixed', left: -99999, top: 0,
+          width: 360, height: 420, overflow: 'hidden', pointerEvents: 'none',
+        }}
+      >
+        <HandControlPanel
+          onHands={onHands}
+          targets={{
+            x: inst.macroNames[1],
+            y: inst.macroNames[0],
+            pinch: inst.macroNames[2],
+            spread: inst.macroNames[3],
+          }}
+        />
+      </div>
 
       <ToastHost message={inst.status} colour={colour} />
       <CreditsPanel open={eggs.credits} onClose={eggs.closeCredits} />
