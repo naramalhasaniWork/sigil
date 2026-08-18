@@ -15,10 +15,13 @@ interface PresetPanelProps {
   onLoad: (id: string) => void;
   onLoadUser: (id: string) => void;
   onSave: (name: string) => void;
+  /** The patch's own true name. The prompt opens with it already filled in. */
+  suggestedName?: string;
 }
 
 export function PresetPanel({
   presets, userPresets, activeId, colour, onLoad, onLoadUser, onSave,
+  suggestedName = '',
 }: PresetPanelProps): JSX.Element {
   const row = (p: PresetEntry, mine: boolean): JSX.Element => {
     const active = activeId === p.id;
@@ -49,7 +52,9 @@ export function PresetPanel({
           className="border-[2px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em]"
           style={{ borderColor: colour, color: colour }}
           onClick={(): void => {
-            const name = window.prompt('Name this patch');
+            // Pre-filled with what the patch actually reads as, so naming a
+            // sound is a confirmation rather than a blank page.
+            const name = window.prompt('Name this patch', suggestedName);
             if (name?.trim()) onSave(name.trim());
           }}
         >

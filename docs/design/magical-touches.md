@@ -119,9 +119,13 @@ a checkbox into a vote, which retroactively makes every earlier click meaningful
 *Risk:* real, and worth naming. A taste vector that only accumulates walks parameters to the
 walls — always keep the brighter one and cutoff pins at 18 kHz, at which point every child is
 identical and the hunt dies. Mitigations: the vector is clamped to ±0.5 in normalised space,
-decays each generation, and is applied at partial strength so the seed is nudged, not
-teleported. It also resets on engine change, because a taste vector is indexed by parameter
-and parameter 7 means something different in FM than in Analog.
+decays every generation so taste has to be re-expressed to survive, and is applied at partial
+strength, which bounds one generation's drift to well under half a parameter's range — the
+seed is nudged, never teleported. It also resets on engine change, because a taste vector is
+indexed by parameter and parameter 7 means something different in FM than in Analog. What it
+deliberately does *not* prevent is a player who consistently keeps the brightest child for
+eight generations arriving at maximum brightness; that is not runaway feedback, that is them
+getting what they asked for, and `Forget` is one press away.
 
 ### 6. The gap between your hands
 Replace the right hand's four-macro smear with one axis computed from the *relationship*
@@ -231,7 +235,8 @@ an instrument you keep choosing with should eventually know what you keep choosi
 | Module | Contents | Tests |
 |---|---|---|
 | `src/dsp/signature.ts` | macro-axis signature, deterministic hash, `sigilName`, `sigilOf` geometry, `uniqueName` | `tests/dsp/signature.test.ts` |
-| `src/dsp/lineage.ts` | `PARAM_WORDS` table, `rankedMoves`, `topLabels`, `renderTrail`, `appendStep` | `tests/dsp/lineage.test.ts` |
+| `src/dsp/sigil-words.ts` | the naming vocabulary, eight synonyms per axis polarity | via `signature.test.ts` |
+| `src/dsp/lineage.ts` | word table, `rankedMoves`, `topLabels`, `describeAcross`, `renderTrail`, `appendStep` | `tests/dsp/lineage.test.ts` |
 | `src/dsp/taste.ts` | `tasteFrom`, `blendTaste`, `applyTaste`, `decayTaste`, `tasteStrength` | `tests/dsp/taste.test.ts` |
 | `src/ui/use-hunt-lore.ts` | lineage steps, tentative step, taste accumulation, seed biasing | covered via the pure modules |
 | `src/ui/components/sigil-glyph.tsx` | the mark, flat strokes | — |
@@ -242,3 +247,23 @@ an instrument you keep choosing with should eventually know what you keep choosi
 Reached in the UI: **Hunt** tab for cards, trail, taste line and `Forget`; **Sculpt** tab for
 the current sound's sigil card and `Name it`; the Save prompt in the preset rail arrives
 prefilled with the true name.
+
+### Four things the browser found that the tests could not
+
+1. **The mark was invisible for real patches.** Nine evenly sampled parameters missed the
+   cutoff entirely in Analog's 39, so a dark patch and a bright one drew the identical glyph.
+   Spokes now read the identity axes interleaved with sampled parameters.
+2. **The mark did not use its own frame.** Analog's defaults sit at body 0.15 and motion 0, so
+   every spoke landed near the minimum radius and the glyph was a tiny lopsided tangle in the
+   middle of the box. Spokes are now scaled so the longest reaches the rim, with a floor so a
+   near-silent patch is not blown up into a starburst.
+3. **Hydration mismatch on every page load.** `Math.cos` is not bit-identical across engines:
+   the server rendered `x2="62.60974715863566"` where the browser computed `…67`. All sigil
+   geometry is now quantised to 1/100 of the box.
+4. **One press of Breed wrote `bred → bred`.** `commit` nested a `setSteps` call inside a
+   `setTentative` updater, which made the updater impure, and React's development
+   double-invocation ran it twice. The pending step is now read from a ref and cleared before
+   the update is queued.
+
+All four are covered by regression tests, except (3) and (4) which are covered by a
+quantisation assertion and by the updater no longer being able to double-apply.

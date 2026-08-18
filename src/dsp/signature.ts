@@ -1,5 +1,6 @@
 import type { EngineDescriptor, ParamDescriptor } from '@/audio/types';
 import { normalise } from '@/dsp/mutation';
+import { AXIS_WORDS } from '@/dsp/sigil-words';
 
 /**
  * A patch's identity, read out of the patch itself.
@@ -54,6 +55,19 @@ const CUT_REACH = 46;
 function safe01(v: number): number {
   if (!Number.isFinite(v)) return 0.5;
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/**
+ * Quantises a coordinate to 1/100 of the box.
+ *
+ * Not cosmetic. `Math.cos` is not required to be bit-identical across engines, and
+ * it is not: the server rendered `x2="62.60974715863566"` where the browser
+ * computed `62.60974715863567`, and React reported a hydration mismatch on every
+ * single load. Rounding puts the two on the same number, and 0.01 of a 100-unit
+ * box is far below one device pixel at any size this is drawn at.
+ */
+function snap(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 function valueAt(values: Float32Array, i: number, p: ParamDescriptor): number {
@@ -121,35 +135,6 @@ export function patchHash(values: Float32Array, descriptor: EngineDescriptor): n
   return h >>> 0;
 }
 
-interface Polarity { readonly adj: readonly string[]; readonly noun: readonly string[] }
-interface AxisWords { readonly high: Polarity; readonly low: Polarity }
-
-/**
- * The vocabulary. Materials, weather and architecture only: nothing jokey, no
- * adjectives pressed into service as nouns, nothing that will read as a random
- * word generator in six months. The adjective comes from the patch's most
- * extreme axis and the noun from its second, so the two words are never
- * describing the same thing twice.
- */
-const AXIS_WORDS: readonly AxisWords[] = [
-  { // body
-    high: { adj: ['Heavy', 'Deep', 'Leaden', 'Thick', 'Sunken'], noun: ['Slab', 'Hull', 'Anvil', 'Stone', 'Girder'] },
-    low: { adj: ['Thin', 'Hollow', 'Bare', 'Faint', 'Narrow'], noun: ['Thread', 'Reed', 'Wire', 'Husk', 'Paper'] },
-  },
-  { // air
-    high: { adj: ['Bright', 'Silver', 'Keen', 'Pale', 'Open'], noun: ['Halo', 'Sheen', 'Frost', 'Chrome', 'Spire'] },
-    low: { adj: ['Dim', 'Dusk', 'Muted', 'Umber', 'Shuttered'], noun: ['Shade', 'Wool', 'Peat', 'Cellar', 'Loam'] },
-  },
-  { // grit
-    high: { adj: ['Rusted', 'Burnt', 'Scarred', 'Coarse', 'Charred'], noun: ['Ash', 'Cinder', 'Tar', 'Slag', 'Grindstone'] },
-    low: { adj: ['Clean', 'Smooth', 'Clear', 'Fine', 'Soft'], noun: ['Silk', 'Milk', 'Vellum', 'Salt', 'Ivory'] },
-  },
-  { // motion
-    high: { adj: ['Drifting', 'Restless', 'Tidal', 'Wandering', 'Shivering'], noun: ['Tide', 'Swarm', 'Current', 'Pulse', 'Weather'] },
-    low: { adj: ['Still', 'Fixed', 'Steady', 'Held', 'Quiet'], noun: ['Anchor', 'Slate', 'Column', 'Pane', 'Well'] },
-  },
-];
-
 function axisValues(sig: Signature): readonly number[] {
   return [sig.body, sig.air, sig.grit, sig.motion];
 }
@@ -214,10 +199,48 @@ export function uniqueName(base: string, taken: Iterable<string>): string {
   return `${base} ${used.size + 1}`;
 }
 
-/** Which parameter a spoke reads, sampling evenly across the whole descriptor. */
-function spokeParamIndex(i: number, count: number): number {
-  if (count <= 1) return 0;
-  return Math.round((i * (count - 1)) / (SPOKES - 1));
+/**
+ * The nine lengths the mark is built from.
+ *
+ * Deliberately NOT nine evenly sampled parameters: with 39 parameters in Analog,
+ * even sampling skipped the cutoff entirely, so two patches an octave apart in
+ * brightness drew the identical glyph. The mark has to move when the *sound*
+ * moves. So the five identity axes are interleaved with four sampled structural
+ * parameters — the axes make it responsive to character, the samples keep two
+ * patches with the same character visually distinct, and interleaving stops all
+ * the character sitting on one side of the form.
+ */
+function spokeValues(values: Float32Array, descriptor: EngineDescriptor): number[] {
+  const sig = patchSignature(values, descriptor);
+  const all = normalisedAll(values, descriptor);
+  const sampled = (slot: number): number => {
+    if (all.length === 0) return 0.5;
+    const i = Math.round((slot * (all.length - 1)) / 3);
+    return safe01(all[i] ?? 0.5);
+  };
+  const raw = [
+    sig.body, sampled(0),
+    sig.air, sampled(1),
+    sig.grit, sampled(2),
+    sig.motion, sampled(3),
+    sig.reach,
+  ];
+
+  /*
+   * Scaled so the longest spoke reaches the rim.
+   *
+   * Without this, the mark is unreadable for most real patches: Analog's own
+   * defaults sit at body 0.15, motion 0, so every spoke landed near the minimum
+   * radius and the glyph drew a tiny lopsided tangle in the middle of the box.
+   * Normalising makes the *proportions* between the axes the signal, which is
+   * what a silhouette can actually carry — and proportion is the thing you
+   * recognise a patch by. The 0.4 floor stops a near-silent patch being blown up
+   * into a starburst by dividing by almost nothing.
+   */
+  let max = 0;
+  for (const v of raw) if (v > max) max = v;
+  const scale = 1 / Math.max(0.4, max);
+  return raw.map((v) => safe01(v * scale));
 }
 
 /**
@@ -230,28 +253,32 @@ function spokeParamIndex(i: number, count: number): number {
  * curves, no gradients, nothing to soften.
  */
 export function sigilOf(values: Float32Array, descriptor: EngineDescriptor): Sigil {
-  const all = normalisedAll(values, descriptor);
+  const lengths = spokeValues(values, descriptor);
   const spokes: Point[] = [];
   let node: Point = { x: CENTRE, y: CENTRE };
   let longest = -1;
 
   for (let i = 0; i < SPOKES; i++) {
-    const n = safe01(all[spokeParamIndex(i, all.length)] ?? 0.5);
+    const n = safe01(lengths[i] ?? 0.5);
     const r = R_MIN + n * R_SPAN;
     const a = ((-90 + i * SPOKE_STEP) * Math.PI) / 180;
-    const p = { x: CENTRE + Math.cos(a) * r, y: CENTRE + Math.sin(a) * r };
+    const p = { x: snap(CENTRE + Math.cos(a) * r), y: snap(CENTRE + Math.sin(a) * r) };
     spokes.push(p);
     if (r > longest) { longest = r; node = p; }
   }
 
-  const sig = patchSignature(values, descriptor);
-  const cutAngle = ((-70 + sig.motion * 140) * Math.PI) / 180;
+  // Off the raw Motion axis, not the scaled spoke: the cut's angle should mean
+  // the same thing on every mark regardless of how the spokes were rescaled.
+  const cutAngle = ((-70 + patchSignature(values, descriptor).motion * 140) * Math.PI) / 180;
   const cx = Math.cos(cutAngle) * CUT_REACH;
   const cy = Math.sin(cutAngle) * CUT_REACH;
 
   return {
     spokes,
     node,
-    cut: { x1: CENTRE - cx, y1: CENTRE - cy, x2: CENTRE + cx, y2: CENTRE + cy },
+    cut: {
+      x1: snap(CENTRE - cx), y1: snap(CENTRE - cy),
+      x2: snap(CENTRE + cx), y2: snap(CENTRE + cy),
+    },
   };
 }

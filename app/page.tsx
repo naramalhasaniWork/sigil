@@ -29,6 +29,7 @@ import { ScalePicker, useScaleState } from '@/ui/components/scale-picker';
 import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
+import { SigilCard } from '@/ui/components/sigil-card';
 
 type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export' | 'setup';
 
@@ -189,6 +190,7 @@ export default function Page(): JSX.Element {
             onLoad={inst.loadPreset}
             onLoadUser={inst.loadUserPreset}
             onSave={inst.savePreset}
+            suggestedName={inst.suggestedName}
           />
         </aside>
 
@@ -215,7 +217,7 @@ export default function Page(): JSX.Element {
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             {view === 'sculpt' && (
               <div className="flex flex-col md:flex-row gap-5 items-start">
-                <div className="w-full max-w-[300px] shrink-0">
+                <div className="w-full max-w-[300px] shrink-0 flex flex-col gap-4">
                   <XYPad
                     xLabel={inst.macroNames[1]}
                     yLabel={inst.macroNames[0]}
@@ -223,6 +225,14 @@ export default function Page(): JSX.Element {
                     y={inst.macros[0]}
                     colour={colour}
                     onChange={onXY}
+                  />
+                  <SigilCard
+                    sigil={inst.sigil}
+                    trueName={inst.trueName}
+                    suggestedName={inst.suggestedName}
+                    trail={inst.trail}
+                    colour={colour}
+                    onSave={inst.savePreset}
                   />
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col gap-5">
@@ -326,20 +336,20 @@ export default function Page(): JSX.Element {
               <HuntGrid
                 variations={inst.huntVariations.map((v) => ({
                   id: v.id,
-                  name: v.name,
-                  fingerprint: Array.from(v.patch.values).slice(0, 12).map((val, i) => {
-                    const p = inst.descriptor?.params[i];
-                    if (!p) return 0.5;
-                    return Math.min(1, Math.max(0, (val - p.min) / (p.max - p.min)));
-                  }),
+                  title: v.title,
+                  sigil: v.sigil,
+                  changes: v.changes,
                   kept: v.kept,
                 }))}
                 auditioningId={inst.auditioningId}
                 colour={colour}
+                trail={inst.trail}
+                tasteLabels={inst.tasteLabels}
                 onAudition={inst.auditionVariation}
                 onToggleKeep={inst.toggleKeep}
                 onBreed={inst.breedKept}
                 onReroll={inst.reroll}
+                onForget={inst.forgetTaste}
                 keptCount={inst.huntVariations.filter((v) => v.kept).length}
               />
             )}

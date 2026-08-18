@@ -1,133 +1,105 @@
 'use client';
 
 import type { JSX } from 'react';
+import { Pressable } from './pressable';
+import { HuntCard, type HuntCandidate } from './hunt-card';
 
-export interface Variation {
-  id: string;
-  name: string;
-  /** Normalised 0..1 parameter values, used to draw the fingerprint. */
-  fingerprint: readonly number[];
-  kept: boolean;
-}
+export type Variation = HuntCandidate;
 
 interface HuntGridProps {
   variations: readonly Variation[];
   auditioningId: string | null;
   colour: string;
+  /** Where the current sound came from: `Glass Bell → brighter → bred`. */
+  trail: string;
+  /** What the machine has worked out you keep reaching for. */
+  tasteLabels: readonly string[];
   onAudition: (id: string) => void;
   onToggleKeep: (id: string) => void;
   onBreed: () => void;
   onReroll: () => void;
+  onForget: () => void;
   keptCount: number;
 }
 
 /**
- * Hunt: the machine proposes, you judge. No parameters on screen — each card
- * shows only a fingerprint of its patch, so you choose by ear, not by number.
+ * Hunt: the machine proposes, you judge.
+ *
+ * Still no parameters on screen — the choice is made by ear. What is on screen is
+ * everything you need to choose *deliberately*: each candidate's mark, its true
+ * name, and the words for how it differs. Underneath, the two lines that make a
+ * session accumulate rather than reset — where this sound came from, and what the
+ * machine now believes about your ear.
  */
 export function HuntGrid({
-  variations, auditioningId, colour, onAudition, onToggleKeep, onBreed, onReroll, keptCount,
+  variations, auditioningId, colour, trail, tasteLabels,
+  onAudition, onToggleKeep, onBreed, onReroll, onForget, keptCount,
 }: HuntGridProps): JSX.Element {
   return (
     <section aria-label="Hunt" className="flex flex-col gap-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {variations.map((v) => {
-          const live = v.id === auditioningId;
-          return (
-            <div
-              key={v.id}
-              className="relative border-[3px] flex flex-col"
-              style={{
-                borderColor: v.kept || live ? colour : 'var(--ink)',
-                borderWidth: v.kept ? 5 : 3,
-                background: '#0A0A0A',
-                boxShadow: live ? `5px 5px 0 0 ${colour}` : 'none',
-              }}
-            >
-              {/* Kept is a hard corner flag: at a glance you can count what is
-                  in the breeding pool without reading any button labels. */}
-              {v.kept && (
-                <span
-                  aria-hidden="true"
-                  className="absolute top-0 right-0"
-                  style={{
-                    width: 0, height: 0,
-                    borderTop: `18px solid ${colour}`,
-                    borderLeft: '18px solid transparent',
-                  }}
-                />
-              )}
-              {live && (
-                <span
-                  className="absolute top-1.5 left-2 text-[8px] font-bold uppercase tracking-[0.18em]"
-                  style={{ color: colour }}
-                >
-                  ▶ Sounding
-                </span>
-              )}
-              <button
-                type="button"
-                aria-label={`Audition ${v.name}`}
-                className="p-3 text-left"
-                onClick={(): void => onAudition(v.id)}
-              >
-                <svg viewBox="0 0 100 42" className="w-full h-12" aria-hidden="true">
-                  {v.fingerprint.map((n, i) => {
-                    const w = 100 / Math.max(1, v.fingerprint.length);
-                    const h = Math.max(2, n * 38);
-                    return (
-                      <rect
-                        key={i}
-                        x={i * w + 1}
-                        y={40 - h}
-                        width={Math.max(1, w - 2)}
-                        height={h}
-                        fill={live || v.kept ? colour : '#3A3A38'}
-                      />
-                    );
-                  })}
-                </svg>
-                <div className="label mt-2 truncate">{v.name}</div>
-              </button>
-
-              <button
-                type="button"
-                aria-pressed={v.kept}
-                className="border-t-[3px] py-1.5 text-[9px] font-bold uppercase tracking-[0.18em]"
-                style={{
-                  borderColor: v.kept ? colour : 'var(--ink)',
-                  background: v.kept ? colour : 'transparent',
-                  color: v.kept ? 'var(--bg)' : 'var(--muted)',
-                }}
-                onClick={(): void => onToggleKeep(v.id)}
-              >
-                {v.kept ? '✓ In pool' : 'Keep'}
-              </button>
-            </div>
-          );
-        })}
+        {variations.map((v) => (
+          <HuntCard
+            key={v.id}
+            candidate={v}
+            live={v.id === auditioningId}
+            colour={colour}
+            onAudition={onAudition}
+            onToggleKeep={onToggleKeep}
+          />
+        ))}
       </div>
 
-      <div className="flex gap-3">
-        <button
-          type="button"
-          className="hard border-[3px] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
-          style={{ borderColor: 'var(--ink)', background: colour, color: 'var(--bg)' }}
+      {/* The story so far. One line, no timestamps, no tree — the moment this
+          needs scrolling it has stopped being a story and become a log. */}
+      {trail !== '' && (
+        <div
+          className="border-[3px] px-3 py-2.5 flex flex-col gap-1"
+          style={{ borderColor: '#2A2A28', background: 'var(--panel)' }}
+        >
+          <span className="label" style={{ color: 'var(--ink)' }}>Found by</span>
+          <span
+            className="text-[11px] font-bold leading-snug"
+            style={{ color: 'var(--ink)' }}
+          >
+            {trail}
+          </span>
+        </div>
+      )}
+
+      {/* Keeping is a vote, and this is the machine admitting how it counted. */}
+      {tasteLabels.length > 0 && (
+        <div
+          className="border-[3px] px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap"
+          style={{ borderColor: colour, background: 'var(--panel)' }}
+        >
+          <span className="flex flex-col gap-1">
+            <span className="label" style={{ color: 'var(--ink)' }}>Following your ear</span>
+            <span
+              className="text-[11px] font-bold uppercase tracking-[0.06em]"
+              style={{ color: 'var(--ink)' }}
+            >
+              {tasteLabels.join(' · ')}
+            </span>
+          </span>
+          <Pressable onPress={onForget} ariaLabel="Forget what the hunt learned">
+            Forget
+          </Pressable>
+        </div>
+      )}
+
+      <div className="flex gap-3 flex-wrap">
+        <Pressable
+          onPress={onBreed}
           disabled={keptCount < 1}
-          onClick={onBreed}
+          colour={colour}
+          variant="solid"
         >
           {keptCount === 0
             ? 'Keep some first'
             : keptCount === 1 ? 'Breed from 1' : `Breed from ${keptCount}`}
-        </button>
-        <button
-          type="button"
-          className="hard border-[3px] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em]"
-          style={{ borderColor: 'var(--ink)', background: 'transparent', color: 'var(--ink)' }}
-          onClick={onReroll}
-        >
-          Reroll
-        </button>
+        </Pressable>
+        <Pressable onPress={onReroll}>Reroll</Pressable>
       </div>
     </section>
   );

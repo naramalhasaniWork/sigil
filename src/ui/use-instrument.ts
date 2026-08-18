@@ -15,6 +15,9 @@ import { PRESETS, presetToValues } from '@/dsp/presets';
 import {
   makeRng, variations as makeVariations, breed, normalise, denormalise, type Patch,
 } from '@/dsp/mutation';
+import { nameOf, sigilOf, uniqueName, type Sigil } from '@/dsp/signature';
+import { describeAcross } from '@/dsp/lineage';
+import { useHuntLore } from '@/ui/use-hunt-lore';
 
 export type Layout = 'keys' | 'pads';
 
@@ -26,6 +29,8 @@ export interface UserPreset {
   engineId: string;
   values: number[];
   savedAt: string;
+  /** How this patch was found, e.g. `Glass Bell → brighter → bred`. */
+  lineage?: string;
 }
 
 export interface HuntVariation {
@@ -37,6 +42,19 @@ export interface HuntVariation {
   fx: Float32Array;
   magic: Float32Array;
   kept: boolean;
+  /** The patch's own true name, read off its parameters. */
+  title: string;
+  /** The patch's mark, so a grid of six reads as six things and not one. */
+  sigil: Sigil;
+  /** Which way this one went, relative to the seed: `Brighter`, `Longer tail`. */
+  changes: readonly string[];
+}
+
+/** One generation's starting point, across all three chains. */
+interface GenerationSeed {
+  engine: Float32Array;
+  fx: Float32Array;
+  magic: Float32Array;
 }
 
 function defaultsFor(d: EngineDescriptor): Float32Array {
@@ -100,6 +118,17 @@ export function useInstrument() {
   );
   const descriptor = engine?.descriptor;
   const current = values[engineId];
+
+  /*
+   * Where the current sound came from, and what the machine has worked out about
+   * your ear. Declared here rather than beside Hunt because loading a preset is
+   * what starts a story, and that happens further up.
+   */
+  const lore = useHuntLore(engineId);
+  const {
+    commit: loreCommit, suggest: loreSuggest, observe: loreObserve,
+    seedFor: loreSeedFor, reset: loreReset, forget: forgetTaste,
+  } = lore;
 
   // Phone gets pads, desktop gets keys — overridable, and the choice sticks.
   useEffect(() => {
@@ -340,8 +369,10 @@ export function useInstrument() {
     if (!preset || !descriptor) return;
     loadValues(presetToValues(preset, descriptor));
     setActivePresetId(presetId);
+    // A preset is an origin: the story of anything found from here starts here.
+    loreReset(preset.name);
     setStatus(`Loaded ${preset.name}`);
-  }, [descriptor, loadValues]);
+  }, [descriptor, loadValues, loreReset]);
 
   // ---- User presets ------------------------------------------------------
   const [userPresets, setUserPresets] = useState<readonly UserPreset[]>([]);
@@ -373,19 +404,25 @@ export function useInstrument() {
       engineId,
       values: Array.from(arr),
       savedAt: new Date().toISOString(),
+      // The patch keeps the story of how it was found. A sound you can retell
+      // is a sound you keep.
+      ...(lore.trail === '' ? {} : { lineage: lore.trail }),
     };
     persistUserPresets([...userPresets.filter((u) => u.id !== entry.id), entry]);
     setActivePresetId(entry.id);
+    // Naming it makes it an origin in its own right.
+    loreReset(name);
     setStatus(`Saved ${name}`);
-  }, [values, engineId, userPresets, persistUserPresets]);
+  }, [values, engineId, userPresets, persistUserPresets, lore.trail, loreReset]);
 
   const loadUserPreset = useCallback((id: string): void => {
     const found = userPresets.find((u) => u.id === id);
     if (!found) return;
     loadValues(Float32Array.from(found.values));
     setActivePresetId(id);
+    loreReset(found.name);
     setStatus(`Loaded ${found.name}`);
-  }, [userPresets, loadValues]);
+  }, [userPresets, loadValues, loreReset]);
 
   const deleteUserPreset = useCallback((id: string): void => {
     persistUserPresets(userPresets.filter((u) => u.id !== id));
@@ -437,53 +474,121 @@ export function useInstrument() {
   const seedRef = useRef(1);
   const [huntVariations, setHuntVariations] = useState<readonly HuntVariation[]>([]);
   const [auditioningId, setAuditioningId] = useState<string | null>(null);
+  /** What this generation grew from, so a child can say how it differs. */
+  const genSeedRef = useRef<GenerationSeed | null>(null);
+
+  /**
+   * Builds one generation's cards from raw mutations: each gets its own true
+   * name, its own mark, and the one or two words that say how it differs from
+   * what it grew out of. This is the whole difference between six cards called
+   * "Variation 1..6" and six cards you can choose between.
+   */
+  const describeGeneration = useCallback((
+    seed: GenerationSeed,
+    children: readonly GenerationSeed[],
+    idPrefix: string,
+  ): HuntVariation[] => {
+    if (!descriptor) return [];
+    return children.map((child, i) => ({
+      id: `${idPrefix}-${i}`,
+      name: `Variation ${i + 1}`,
+      patch: { engineId, values: child.engine },
+      fx: child.fx,
+      magic: child.magic,
+      kept: false,
+      title: nameOf(child.engine, descriptor),
+      sigil: sigilOf(child.engine, descriptor),
+      changes: describeAcross([
+        { from: seed.engine, to: child.engine, descriptor },
+        { from: seed.fx, to: child.fx, descriptor: FX_DESCRIPTOR },
+        { from: seed.magic, to: child.magic, descriptor: FX_MAGIC_DESCRIPTOR },
+      ]),
+    }));
+  }, [descriptor, engineId]);
 
   const reroll = useCallback((): void => {
     if (!descriptor || !current) return;
+    /*
+     * A hunt started from nothing still has an origin: the sound you were
+     * already holding, under its own true name. Without this the trail reads as
+     * one lonely word — "narrower" — with nothing for it to be narrower *than*.
+     * Otherwise, rerolling moves on from whatever you were auditioning, so that
+     * step becomes part of the story rather than a maybe.
+     */
+    if (lore.trail === '') loreReset(nameOf(current, descriptor));
+    else loreCommit();
     const rng = makeRng(seedRef.current++);
-    const seed: Patch = { engineId, values: Float32Array.from(current) };
+    /*
+     * The seed is nudged along the taste direction first: after a few
+     * generations of keeping the same kind of thing, the machine offers that
+     * kind of thing. With no taste yet this is exactly the old behaviour.
+     */
+    const seed: GenerationSeed = {
+      engine: loreSeedFor(current, descriptor),
+      fx: Float32Array.from(fxValues),
+      magic: Float32Array.from(magicValues),
+    };
+    genSeedRef.current = seed;
     // FX move less than the engine: a wild reverb or freeze setting swamps the
     // sound being judged, so the tail stays recognisable while the voice roams.
-    const fxSeed: Patch = { engineId: 'fx', values: Float32Array.from(fxValues) };
-    const magicSeed: Patch = { engineId: 'magic', values: Float32Array.from(magicValues) };
-    const engines = makeVariations(seed, descriptor, 6, 0.45, rng);
-    const fxs = makeVariations(fxSeed, FX_DESCRIPTOR, 6, 0.22, rng);
-    const magics = makeVariations(magicSeed, FX_MAGIC_DESCRIPTOR, 6, 0.18, rng);
-    setHuntVariations(engines.map((patch, i) => ({
-      id: `${seedRef.current}-${i}`,
-      name: `Variation ${i + 1}`,
-      patch,
-      fx: fxs[i]?.values ?? Float32Array.from(fxValues),
-      magic: magics[i]?.values ?? Float32Array.from(magicValues),
-      kept: false,
-    })));
+    const engines = makeVariations({ engineId, values: seed.engine }, descriptor, 6, 0.45, rng);
+    const fxs = makeVariations({ engineId: 'fx', values: seed.fx }, FX_DESCRIPTOR, 6, 0.22, rng);
+    const magics = makeVariations(
+      { engineId: 'magic', values: seed.magic }, FX_MAGIC_DESCRIPTOR, 6, 0.18, rng,
+    );
+    const children: GenerationSeed[] = engines.map((patch, i) => ({
+      engine: patch.values,
+      fx: fxs[i]?.values ?? Float32Array.from(seed.fx),
+      magic: magics[i]?.values ?? Float32Array.from(seed.magic),
+    }));
+    setHuntVariations(describeGeneration(seed, children, `${seedRef.current}`));
     setAuditioningId(null);
-  }, [descriptor, current, engineId, fxValues, magicValues]);
+  }, [
+    descriptor, current, engineId, fxValues, magicValues,
+    lore.trail, loreReset, loreCommit, loreSeedFor, describeGeneration,
+  ]);
 
   const breedKept = useCallback((): void => {
     if (!descriptor) return;
     const kept = huntVariations.filter((v) => v.kept);
-    if (kept.length === 0) return;
+    const first = kept[0];
+    if (first === undefined) return;
+
+    /*
+     * Keeping is a vote, and this is where it is counted: the offsets between
+     * what was offered and what you kept become the standing taste, which biases
+     * every generation from here on.
+     */
+    const offered = genSeedRef.current;
+    if (offered !== null) {
+      loreObserve(offered.engine, kept.map((k) => k.patch.values), descriptor);
+    }
+    loreCommit('bred');
+
     const rng = makeRng(seedRef.current++);
-    const next: HuntVariation[] = [];
+    const children: GenerationSeed[] = [];
     for (let i = 0; i < 6; i++) {
       const pa = kept[i % kept.length];
       const pb = kept[(i + 1) % kept.length] ?? pa;
       if (!pa || !pb) continue;
-      next.push({
-        id: `${seedRef.current}-b${i}`,
-        name: `Child ${i + 1}`,
-        patch: breed(pa.patch, pb.patch, descriptor, rng),
+      children.push({
+        engine: breed(pa.patch, pb.patch, descriptor, rng).values,
         fx: breed({ engineId: 'fx', values: pa.fx },
                   { engineId: 'fx', values: pb.fx }, FX_DESCRIPTOR, rng).values,
         magic: breed({ engineId: 'magic', values: pa.magic },
                      { engineId: 'magic', values: pb.magic }, FX_MAGIC_DESCRIPTOR, rng).values,
-        kept: false,
       });
     }
-    setHuntVariations(next);
+
+    // Children are described against the first parent, because "how does this
+    // differ from the one I kept" is the question you are actually asking.
+    const parent: GenerationSeed = {
+      engine: first.patch.values, fx: first.fx, magic: first.magic,
+    };
+    genSeedRef.current = parent;
+    setHuntVariations(describeGeneration(parent, children, `${seedRef.current}-b`));
     setAuditioningId(null);
-  }, [descriptor, huntVariations]);
+  }, [descriptor, huntVariations, loreObserve, loreCommit, describeGeneration]);
 
   const auditionVariation = useCallback((id: string): void => {
     const found = huntVariations.find((v) => v.id === id);
@@ -500,12 +605,41 @@ export function useInstrument() {
         host.setParam(addressOf('magic', i), found.magic[i] as number);
       }
     }
+    /*
+     * Auditioning a sibling is a lateral move, not a step deeper, so its word
+     * REPLACES the last one in the trail instead of stacking. Clicking through
+     * all six cards must not leave you with a six-word story you did not write.
+     */
+    loreSuggest(found.changes[0]);
     setAuditioningId(id);
-  }, [huntVariations, loadValues]);
+  }, [huntVariations, loadValues, loreSuggest]);
 
   const toggleKeep = useCallback((id: string): void => {
     setHuntVariations((prev) => prev.map((v) => (v.id === id ? { ...v, kept: !v.kept } : v)));
   }, []);
+
+  /*
+   * The current sound's identity, read straight off its parameters — so it is
+   * correct the instant a macro moves, with nothing to invalidate and nothing
+   * stored. The name is only a suggestion; it lands in the Save prompt already
+   * filled in, which is the difference between naming a thing and doing admin.
+   */
+  const sigil = useMemo(
+    () => (descriptor && current ? sigilOf(current, descriptor) : null),
+    [descriptor, current],
+  );
+
+  const trueName = useMemo(
+    () => (descriptor && current ? nameOf(current, descriptor) : null),
+    [descriptor, current],
+  );
+
+  const suggestedName = useMemo(
+    () => (trueName === null
+      ? ''
+      : uniqueName(trueName, userPresetsForEngine.map((u) => u.name))),
+    [trueName, userPresetsForEngine],
+  );
 
   return {
     host: hostRef.current,
@@ -520,6 +654,8 @@ export function useInstrument() {
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep, auditioningId,
+    sigil, trueName, suggestedName,
+    trail: lore.trail, tasteLabels: lore.tasteLabels, forgetTaste,
     macros, setMacro, macroNames, setParamByAddress,
     fxDescriptor: FX_DESCRIPTOR, fxValues, setFxParam,
     magicDescriptor: FX_MAGIC_DESCRIPTOR, magicValues, setMagicParam,

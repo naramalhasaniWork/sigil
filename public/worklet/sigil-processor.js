@@ -4171,7 +4171,11 @@ var DRIVE_MAX_G = 24;
 var TILT_HZ = 900;
 var TILT_AMOUNT = 0.9;
 var LIMIT = 1.5;
+var SILENT = 1e-4;
 var FxChain = class {
+  wasChorus = false;
+  wasDelay = false;
+  wasReverb = false;
   sm = [];
   target = new Float32Array(N_PARAMS);
   /** Smoothed, in DSP units — the only path into the DSP, so an un-smoothed
@@ -4237,8 +4241,26 @@ var FxChain = class {
     this.delay.reset();
     this.reverb.reset();
   }
+  /**
+   * PERFORMANCE: chorus, delay and reverb are skipped when their mix is silent.
+   *
+   * They used to run unconditionally and blend to nothing, which measured 1.69%
+   * of a core for a chain producing its input unchanged. Re-enabling resets the
+   * unit, because its delay lines still hold audio from before the bypass and
+   * fading that in would burst stale sound.
+   */
   process(buffer, count) {
     const v = this.v, sm = this.sm;
+    for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
+    const onChorus = v[P_CH_MIX] > SILENT;
+    const onDelay = v[P_DL_MIX] > SILENT;
+    const onReverb = v[P_RV_MIX] > SILENT;
+    if (onChorus && !this.wasChorus) this.chorus.reset();
+    if (onDelay && !this.wasDelay) this.delay.reset();
+    if (onReverb && !this.wasReverb) this.reverb.reset();
+    this.wasChorus = onChorus;
+    this.wasDelay = onDelay;
+    this.wasReverb = onReverb;
     for (let n = 0; n < count; n++) {
       for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
       const dry = buffer[n];
@@ -4258,9 +4280,9 @@ var FxChain = class {
       }
       const half = v[P_CRUSH_BITS];
       x = Math.floor(this.held * half + 0.5) / half;
-      x = this.chorus.process(x, v);
-      x = this.delay.process(x, v);
-      x = this.reverb.process(x, v);
+      if (onChorus) x = this.chorus.process(x, v);
+      if (onDelay) x = this.delay.process(x, v);
+      if (onReverb) x = this.reverb.process(x, v);
       x = sat(x * v[P_TRIM] / LIMIT) * LIMIT;
       buffer[n] = x === x ? x : 0;
     }
@@ -5009,7 +5031,16 @@ var Stutter = class {
     return y;
   }
 };
+var SILENT2 = 1e-4;
 var MagicChain = class {
+  /** Smoother targets, so gating opens a unit the instant a mix starts rising
+   *  rather than waiting for the smoothed value to clear the threshold. */
+  tgt = new Float32Array(FX_MAGIC_DESCRIPTOR.params.length);
+  wasVowel = false;
+  wasShift = false;
+  wasStutter = false;
+  wasShimmer = false;
+  wasTape = false;
   sr;
   sm = [];
   val;
@@ -5059,6 +5090,7 @@ var MagicChain = class {
     }
     if (index === MAGIC_PARAM.freezeLength) this.freezeLenMs = v;
     this.sm[index].setTarget(v);
+    this.tgt[index] = v;
   }
   reset() {
     this.freezer.reset();
@@ -5071,6 +5103,21 @@ var MagicChain = class {
     this.wantCapture = false;
     this.wantRelease = false;
   }
+  /**
+   * PERFORMANCE: each unit is skipped entirely when its mix is silent.
+   *
+   * `blend(x, unit.process(...), mix)` reads as a bypass, but JavaScript
+   * evaluates arguments eagerly — so the vowel filter, frequency shifter,
+   * stutter, shimmer's pitch-shifting feedback delay, freezer and tape model all
+   * ran in full and had their output thrown away. Measured: this chain cost
+   * 2.49% of a core with every mix at zero, against 3.27% for the entire
+   * 16-voice synth. Two chains burned more CPU doing nothing than the instrument
+   * spent making sound.
+   *
+   * Re-enabling a unit resets it. Its delay lines hold audio from before the
+   * bypass, and fading that back in would burst stale sound — nothing was
+   * audible at mix zero, so there is no continuity worth preserving.
+   */
   process(buffer, count) {
     if (this.wantCapture) {
       this.freezer.capture(this.freezeLenMs / 1e3 * this.sr);
@@ -5083,44 +5130,83 @@ var MagicChain = class {
     const v = this.val;
     const np = v.length;
     const sr = this.sr;
+    const t = this.tgt;
+    const live = (idx) => v[idx] > SILENT2 || t[idx] > SILENT2;
+    const onVowel = live(MAGIC_PARAM.vowelMix);
+    const onShift = live(MAGIC_PARAM.shiftMix);
+    const onStutter = live(MAGIC_PARAM.stutterMix);
+    const onShimmer = live(MAGIC_PARAM.shimmerMix);
+    const onFreeze = live(MAGIC_PARAM.freezeMix);
+    const onTape = live(MAGIC_PARAM.tapeWear) || live(MAGIC_PARAM.tapeWow) || live(MAGIC_PARAM.tapeFlutter);
+    if (onVowel && !this.wasVowel) this.vowel.reset();
+    if (onShift && !this.wasShift) this.shifter.reset();
+    if (onStutter && !this.wasStutter) this.stutter.reset();
+    if (onShimmer && !this.wasShimmer) this.shimmer.reset();
+    if (onTape && !this.wasTape) this.tape.reset();
+    this.wasVowel = onVowel;
+    this.wasShift = onShift;
+    this.wasStutter = onStutter;
+    this.wasShimmer = onShimmer;
+    this.wasTape = onTape;
+    if (!onVowel && !onShift && !onStutter && !onShimmer && !onFreeze && !onTape) {
+      for (let i = 0; i < count; i++) {
+        for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
+        this.freezer.process(buffer[i]);
+      }
+      return;
+    }
+    const stutterRatio = 2 ** (t[MAGIC_PARAM.stutterPitch] / 12);
+    const shimmerRatio = 2 ** (t[MAGIC_PARAM.shimmerPitch] / 12);
+    const stutterSlice = t[MAGIC_PARAM.stutterSlice] / 1e3 * sr;
+    const shimmerSize = t[MAGIC_PARAM.shimmerSize] / 1e3 * sr;
+    const shimmerFb = t[MAGIC_PARAM.shimmerFeedback] * 0.85;
     for (let i = 0; i < count; i++) {
       for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
       let x = buffer[i];
-      x = blend(
-        x,
-        this.vowel.process(x, v[MAGIC_PARAM.vowelPos], v[MAGIC_PARAM.vowelSharp]),
-        v[MAGIC_PARAM.vowelMix]
-      );
-      x = blend(
-        x,
-        this.shifter.process(x, v[MAGIC_PARAM.shiftHz], v[MAGIC_PARAM.shiftRing]),
-        v[MAGIC_PARAM.shiftMix]
-      );
-      x = blend(
-        x,
-        this.stutter.process(
+      if (onVowel) {
+        x = blend(
           x,
-          v[MAGIC_PARAM.stutterSlice] / 1e3 * sr,
+          this.vowel.process(x, v[MAGIC_PARAM.vowelPos], v[MAGIC_PARAM.vowelSharp]),
+          v[MAGIC_PARAM.vowelMix]
+        );
+      }
+      if (onShift) {
+        x = blend(
+          x,
+          this.shifter.process(x, v[MAGIC_PARAM.shiftHz], v[MAGIC_PARAM.shiftRing]),
+          v[MAGIC_PARAM.shiftMix]
+        );
+      }
+      if (onStutter) {
+        x = blend(x, this.stutter.process(
+          x,
+          stutterSlice,
           v[MAGIC_PARAM.stutterChance],
-          2 ** (v[MAGIC_PARAM.stutterPitch] / 12)
-        ),
-        v[MAGIC_PARAM.stutterMix]
-      );
-      x = blend(x, this.shimmer.process(
-        x,
-        v[MAGIC_PARAM.shimmerSize] / 1e3 * sr,
-        v[MAGIC_PARAM.shimmerFeedback] * 0.85,
-        2 ** (v[MAGIC_PARAM.shimmerPitch] / 12),
-        v[MAGIC_PARAM.shimmerDamp]
-      ), v[MAGIC_PARAM.shimmerMix]);
-      const fm = v[MAGIC_PARAM.freezeMix];
-      x = x * (1 - 0.5 * fm) + this.freezer.process(x) * fm;
-      x = this.tape.process(
-        x,
-        v[MAGIC_PARAM.tapeWear],
-        v[MAGIC_PARAM.tapeWow],
-        v[MAGIC_PARAM.tapeFlutter]
-      );
+          stutterRatio
+        ), v[MAGIC_PARAM.stutterMix]);
+      }
+      if (onShimmer) {
+        x = blend(x, this.shimmer.process(
+          x,
+          shimmerSize,
+          shimmerFb,
+          shimmerRatio,
+          v[MAGIC_PARAM.shimmerDamp]
+        ), v[MAGIC_PARAM.shimmerMix]);
+      }
+      const frozen = this.freezer.process(x);
+      if (onFreeze) {
+        const fm = v[MAGIC_PARAM.freezeMix];
+        x = x * (1 - 0.5 * fm) + frozen * fm;
+      }
+      if (onTape) {
+        x = this.tape.process(
+          x,
+          v[MAGIC_PARAM.tapeWear],
+          v[MAGIC_PARAM.tapeWow],
+          v[MAGIC_PARAM.tapeFlutter]
+        );
+      }
       if (!(x > -1e9 && x < 1e9)) {
         this.reset();
         x = 0;

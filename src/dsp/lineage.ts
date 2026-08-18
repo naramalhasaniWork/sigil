@@ -143,6 +143,28 @@ export function topLabels(moves: readonly Move[], limit = 2): string[] {
   return out;
 }
 
+export interface Comparison {
+  from: Float32Array;
+  to: Float32Array;
+  descriptor: EngineDescriptor;
+}
+
+/**
+ * The best phrases across several parameter chains at once.
+ *
+ * A sound in SIGIL is the engine *and* the FX *and* the character chain, and Hunt
+ * mutates all three, so "what changed" cannot be answered by one descriptor.
+ * Ranking is only fair because every magnitude is already normalised to its own
+ * parameter's range, which makes a cutoff move and a reverb move comparable.
+ */
+export function describeAcross(comparisons: readonly Comparison[], limit = 2): string[] {
+  const moves: Move[] = [];
+  for (const c of comparisons) {
+    for (const m of rankedMoves(c.from, c.to, c.descriptor)) moves.push(m);
+  }
+  return topLabels(moves, limit);
+}
+
 /** Steps kept in a trail before the oldest are forgotten entirely. */
 const TRAIL_CAP = 12;
 
