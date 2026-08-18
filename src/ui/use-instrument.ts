@@ -7,6 +7,9 @@ import { bouncePatch } from '@/audio/bounce';
 import { FX_DESCRIPTOR } from '@/dsp/fx-descriptor';
 import { FX_MAGIC_DESCRIPTOR } from '@/dsp/fx-magic-descriptor';
 import { addressOf, sectionOf } from '@/audio/param-space';
+import {
+  PATCH_FORMAT_VERSION, serialisePatch, loadPatch, toKeyed, fromKeyed,
+} from '@/audio/patch-format';
 import { decodeAudioFile, toMono, normaliseSample, detectPitchHz } from '@/audio/sample-store';
 import { encodeWav16, trimToZeroCrossings, normalisePeak } from '@/audio/wav';
 import { KO2_SAMPLE_RATE } from '@/audio/wav';
@@ -22,6 +25,29 @@ import { useHuntLore } from '@/ui/use-hunt-lore';
 export type Layout = 'keys' | 'pads';
 
 const USER_PRESET_KEY = 'sigil.userPresets.v1';
+
+/**
+ * The live session. Reloading used to lose the sound, the macros and everything
+ * else — the audit named that the single biggest risk, because in a plugin the
+ * same gap becomes "my finished track opens sounding different".
+ *
+ * Values are keyed by parameter id and carry a version, so adding a parameter
+ * later cannot reinterpret a stored session. This is deliberately the format a
+ * plugin's getState/setState would use, so the port inherits a solved problem.
+ *
+ * Deliberately NOT stored: the kit and the export tray. Both hold WAV bytes and
+ * localStorage caps near 5MB — a two-pad kit would blow the whole budget.
+ */
+const SESSION_KEY = 'sigil.session.v2';
+
+interface StoredSession {
+  version: number;
+  engineId: string;
+  engines: Record<string, Record<string, number>>;
+  fx?: Record<string, number>;
+  magic?: Record<string, number>;
+  bounceMs?: number;
+}
 
 export interface UserPreset {
   id: string;
@@ -655,7 +681,126 @@ export function useInstrument() {
     [trueName, userPresetsForEngine],
   );
 
+  // ---- Session persistence ----------------------------------------------
+  /**
+   * Restore once on mount, then save on every change. Restore happens before the
+   * first start(), so powering on already pushes the recovered patch into the
+   * worklet and nothing special is needed at power-on.
+   */
+  const restored = useRef(false);
+
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    try {
+      const raw = window.localStorage.getItem(SESSION_KEY);
+      if (raw === null) return;
+      const session = JSON.parse(raw) as StoredSession;
+      if (typeof session !== 'object' || session === null) return;
+
+      const notes: string[] = [];
+      const nextValues: Record<string, Float32Array> = {};
+      for (const e of ENGINES) {
+        const stored = session.engines?.[e.descriptor.id];
+        const r = fromKeyed(e.descriptor, stored, e.descriptor.name);
+        nextValues[e.descriptor.id] = r.values;
+        if (stored !== undefined) notes.push(...r.warnings);
+      }
+      setValues(nextValues);
+
+      if (session.fx) {
+        const r = fromKeyed(FX_DESCRIPTOR, session.fx, 'FX');
+        setFxValues(r.values);
+        notes.push(...r.warnings);
+      }
+      if (session.magic) {
+        const r = fromKeyed(FX_MAGIC_DESCRIPTOR, session.magic, 'Character');
+        setMagicValues(r.values);
+        notes.push(...r.warnings);
+      }
+      if (typeof session.bounceMs === 'number') setBounceMs(session.bounceMs);
+      if (
+        typeof session.engineId === 'string'
+        && ENGINES.some((e) => e.descriptor.id === session.engineId)
+      ) {
+        setEngineId(session.engineId);
+      }
+
+      // Only speak up when something had to be recovered; a clean restore is
+      // supposed to be invisible.
+      if (notes.length > 0) setStatus(notes[0] ?? null);
+    } catch {
+      // A corrupt session must never stop the instrument from opening.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!restored.current) return;
+    const engines: Record<string, Record<string, number>> = {};
+    for (const e of ENGINES) {
+      const v = values[e.descriptor.id];
+      if (v) engines[e.descriptor.id] = toKeyed(e.descriptor, v);
+    }
+    const session: StoredSession = {
+      version: PATCH_FORMAT_VERSION,
+      engineId,
+      engines,
+      fx: toKeyed(FX_DESCRIPTOR, fxValues),
+      magic: toKeyed(FX_MAGIC_DESCRIPTOR, magicValues),
+      bounceMs,
+    };
+    try {
+      window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch {
+      // Storage full or blocked in private browsing. Playing continues.
+    }
+  }, [values, engineId, fxValues, magicValues, bounceMs]);
+
+  /**
+   * The whole instrument as one serialisable object — exactly what a plugin host
+   * asks for on save. Exposed so the port has an obvious seam instead of needing
+   * this rebuilt.
+   */
+  const exportPatch = useCallback((name?: string) => {
+    if (!descriptor || !current) return null;
+    return serialisePatch({
+      engine: descriptor,
+      values: current,
+      fxDescriptor: FX_DESCRIPTOR,
+      fx: fxValues,
+      magicDescriptor: FX_MAGIC_DESCRIPTOR,
+      magic: magicValues,
+      name,
+    });
+  }, [descriptor, current, fxValues, magicValues]);
+
+  const importPatch = useCallback((raw: unknown): boolean => {
+    if (!descriptor) return false;
+    const loaded = loadPatch(raw, descriptor, FX_DESCRIPTOR, FX_MAGIC_DESCRIPTOR);
+    if (loaded === null) {
+      setStatus('That does not look like a SIGIL patch.');
+      return false;
+    }
+    loadValues(loaded.values);
+    if (loaded.fx) {
+      setFxValues(loaded.fx);
+      for (let i = 0; i < loaded.fx.length; i++) {
+        hostRef.current?.setParam(addressOf('fx', i), loaded.fx[i] as number);
+      }
+    }
+    if (loaded.magic) {
+      setMagicValues(loaded.magic);
+      for (let i = 0; i < loaded.magic.length; i++) {
+        hostRef.current?.setParam(addressOf('magic', i), loaded.magic[i] as number);
+      }
+    }
+    setStatus(loaded.warnings[0] ?? 'Patch loaded');
+    return true;
+  }, [descriptor, loadValues]);
+
+
   return {
+    exportPatch, importPatch,
     host: hostRef.current,
     started, start,
     engine, descriptor, engineId, selectEngine,
