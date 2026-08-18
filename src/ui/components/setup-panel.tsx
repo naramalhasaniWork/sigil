@@ -34,6 +34,8 @@ interface SetupPanelProps {
   kit: KitHandle;
   colour: string;
   bouncing: boolean;
+  bounceMs: number;
+  onBounceMs: (ms: number) => void;
   onRenderForKit: () => Promise<{ name: string; bytes: Uint8Array; durationMs: number } | null>;
 }
 
@@ -53,7 +55,7 @@ export type SetupSection = (typeof SETUP_SECTIONS)[number];
 export function SetupPanel({
   audioContext, engineDescriptor, fxDescriptor, magicDescriptor,
   padChords, onPadChords, onParam, onNoteOn, onNoteOff, enabled,
-  macroNames, kit, colour, bouncing, onRenderForKit, section, onSection, onHands,
+  macroNames, kit, colour, bouncing, onRenderForKit, section, onSection, onHands, bounceMs, onBounceMs,
 }: SetupPanelProps): JSX.Element {
   /** Every parameter a controller knob can be learned onto, across the chain. */
   const mappable = useMemo<MappableParam[]>(() => {
@@ -107,7 +109,14 @@ export function SetupPanel({
       </div>
 
       {section === 'kit' && (
-        <KitPanel kit={kit} colour={colour} busy={bouncing} onRender={onRenderForKit} />
+        <KitPanel
+          kit={kit}
+          colour={colour}
+          busy={bouncing}
+          bounceMs={bounceMs}
+          onBounceMs={onBounceMs}
+          onRender={onRenderForKit}
+        />
       )}
 
       {section === 'hardware' && <DevicePanel audioContext={audioContext} />}

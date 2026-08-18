@@ -267,7 +267,21 @@ export function useInstrument() {
   const [bouncing, setBouncing] = useState(false);
   const [lastWav, setLastWav] = useState<{ name: string; bytes: Uint8Array } | null>(null);
 
-  const BOUNCE_MS = 2600;
+  /**
+   * Bounce length, in milliseconds.
+   *
+   * This is the ONLY lever on sample size that costs no quality. 16-bit mono at
+   * the KO II's native 46 875 Hz is 93.75 KB per second, and bit depth and rate
+   * are the device's format rather than our choice — so a shorter bounce is the
+   * whole optimisation. The pipeline already trims the dead tail (measured: a
+   * 2600ms request produced 1775ms of file with 0.1KB of trimmable silence), so
+   * this sets the ceiling, not the actual length.
+   *
+   * 1200ms suits plucks and stabs at ~112KB; 2600ms suits long releases at
+   * ~244KB. Pads on the KO II have their own envelopes, so bouncing short and
+   * letting the device shape it is usually the better trade.
+   */
+  const [bounceMs, setBounceMs] = useState(2600);
 
   /**
    * Renders whatever is currently held into WAV bytes without saving anything.
@@ -287,14 +301,14 @@ export function useInstrument() {
         patchParams: Float32Array.from(params),
         engineId,
         midiNotes: notes,
-        durationMs: BOUNCE_MS,
-        releaseAtMs: BOUNCE_MS / 2,
+        durationMs: bounceMs,
+        releaseAtMs: bounceMs / 2,
         targetSampleRate: KO2_SAMPLE_RATE,
       });
       return {
         name: name ?? `sigil-${engineId}-${notes.join('-')}`,
         bytes: result.wav,
-        durationMs: BOUNCE_MS,
+        durationMs: bounceMs,
         sampleRate: result.sampleRate,
       };
     } catch (err) {
@@ -303,7 +317,7 @@ export function useInstrument() {
     } finally {
       setBouncing(false);
     }
-  }, [values, engineId, held]);
+  }, [values, engineId, held, bounceMs]);
 
   /** Renders the held chord and saves it as a file. */
   const bounceChord = useCallback(async (name?: string): Promise<void> => {
@@ -649,7 +663,7 @@ export function useInstrument() {
     layout, chooseLayout,
     held, noteOn, noteOff, panic,
     recording, toggleRecord,
-    bouncing, bounceChord, renderCurrent, lastWav,
+    bouncing, bounceChord, renderCurrent, lastWav, bounceMs, setBounceMs,
     sampleName, loadSampleFile,
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,

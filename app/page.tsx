@@ -318,6 +318,8 @@ export default function Page(): JSX.Element {
                 bouncing={inst.bouncing}
                 onRenderForKit={inst.renderCurrent}
                 onHands={onHands}
+                bounceMs={inst.bounceMs}
+                onBounceMs={inst.setBounceMs}
               />
             </div>
 
