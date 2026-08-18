@@ -516,8 +516,1345 @@ var AnalogEngine = {
   allocVoice: (sampleRate2) => new AnalogVoice(sampleRate2)
 };
 
+// src/dsp/fm-descriptor.ts
+function op(n, ratio, level, why) {
+  return [
+    {
+      id: `op${n}-ratio`,
+      name: `Op ${n} Ratio`,
+      group: `Operator ${n}`,
+      unit: "ratio",
+      min: 0.5,
+      max: 16,
+      default: ratio,
+      curve: "stepped",
+      steps: 17,
+      mutability: 0.7,
+      explain: `How fast operator ${n} runs compared to the note you played. Whole numbers stay musical and harmonic; the half-speed setting adds an octave-below weight. ${why}`
+    },
+    {
+      id: `op${n}-fine`,
+      name: `Op ${n} Fine`,
+      group: `Operator ${n}`,
+      unit: "semitones",
+      min: -0.5,
+      max: 0.5,
+      default: 0,
+      curve: "linear",
+      mutability: 0.8,
+      explain: `Nudges operator ${n} slightly off its exact ratio. Tiny amounts make the tone breathe and beat slowly instead of standing dead still; large amounts sound out of tune.`
+    },
+    {
+      id: `op${n}-level`,
+      name: `Op ${n} Level`,
+      group: `Operator ${n}`,
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: level,
+      curve: "linear",
+      mutability: 0.8,
+      explain: `How loud operator ${n} is. When it is a carrier this is volume; when it is a modulator this is how hard it bends the operator below it, which means brightness.`
+    }
+  ];
+}
+var FM_DESCRIPTOR = {
+  id: "fm",
+  name: "FM",
+  colour: "#4ECDC4",
+  macroNames: ["Body", "Air", "Grit", "Motion"],
+  params: [
+    {
+      id: "algorithm",
+      name: "Algorithm",
+      group: "Routing",
+      unit: "none",
+      min: 0,
+      max: 4,
+      default: 2,
+      curve: "stepped",
+      steps: 5,
+      mutability: 0.6,
+      explain: "Which operators feed which: 0 is a two-operator stack, 1 a three-operator stack, 2 two stacks side by side, 3 four plain sines together, 4 a feedback branch. This is the single biggest change to the character of the sound."
+    },
+    ...op(1, 1, 1, "Operator 1 is a carrier in every algorithm, so its ratio sets the pitch you actually hear."),
+    ...op(2, 2, 0.75, "As a modulator its ratio decides which overtones appear above the note."),
+    ...op(3, 1, 0.9, "It is a carrier in the twin-stack and parallel algorithms, a modulator elsewhere."),
+    ...op(4, 3, 0.7, "This is the operator that can feed back into itself, so odd ratios here get noisy fast."),
+    {
+      id: "index",
+      name: "Index",
+      group: "Tone",
+      unit: "pct",
+      min: 0,
+      max: 12,
+      default: 3,
+      curve: "exp",
+      macro: 1,
+      macroDepth: 0.7,
+      mutability: 0.9,
+      explain: "How hard the modulating operators bend the carriers. At zero you get plain sine tones; raise it and overtones pile on, turning soft bells into bright metallic attacks. This is the brightness control of an FM synth."
+    },
+    {
+      id: "key-scale",
+      name: "Key Scale",
+      group: "Tone",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.6,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "Pulls the index back down as you play higher notes. Without it a patch that sounds rich in the bass turns into harsh fizz at the top of the keyboard, because the overtones run past what your ears can take."
+    },
+    {
+      id: "feedback",
+      name: "Feedback",
+      group: "Tone",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.15,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.6,
+      mutability: 0.9,
+      explain: "Feeds operator 4 back into itself. A little roughens the tone the way a bowed string is rough; pushed hard the sine collapses toward noise, which is how FM makes cymbals and breath."
+    },
+    {
+      id: "spread",
+      name: "Spread",
+      group: "Tone",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.2,
+      curve: "linear",
+      macro: 3,
+      macroDepth: 0.6,
+      mutability: 0.9,
+      explain: "Detunes the four operators away from each other by small, different amounts. The overtones then drift in and out of step, so a held note keeps moving instead of freezing into a dead tone."
+    },
+    {
+      id: "balance",
+      name: "Balance",
+      group: "Mix",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.45,
+      curve: "linear",
+      macro: 0,
+      macroDepth: 0.5,
+      mutability: 0.7,
+      explain: "Tilts the mix between the lower and upper carriers. Turn it down for weight and fundamental; turn it up for the thinner, brighter carrier on top. With a single-carrier algorithm it simply sets how much body the note has."
+    },
+    {
+      id: "amp-attack",
+      name: "Attack",
+      group: "Carrier Envelope",
+      unit: "ms",
+      min: 0.5,
+      max: 4e3,
+      default: 3,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the note takes to reach full volume. Very short is what makes FM pianos and basses snap; long turns the same patch into a glass pad."
+    },
+    {
+      id: "amp-decay",
+      name: "Decay",
+      group: "Carrier Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 700,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How quickly the note falls from its peak toward the sustain level. Short decays with no sustain give you the classic FM bell and electric piano."
+    },
+    {
+      id: "amp-sustain",
+      name: "Sustain",
+      group: "Carrier Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.55,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "The level the note holds at while the key is down. Set it to zero and every note decays away on its own like a struck object."
+    },
+    {
+      id: "amp-release",
+      name: "Release",
+      group: "Carrier Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 400,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the note takes to fade after you let go. Longer releases let chords ring into each other, which flatters bell and mallet tones."
+    },
+    {
+      id: "mod-attack",
+      name: "Mod Attack",
+      group: "Modulator Envelope",
+      unit: "ms",
+      min: 0.5,
+      max: 4e3,
+      default: 1,
+      curve: "exp",
+      mutability: 0.7,
+      explain: "How long the modulating operators take to reach full strength. Slow it down and the note fades in from dull to bright, which reads as a bowed or blown attack."
+    },
+    {
+      id: "mod-decay",
+      name: "Mod Decay",
+      group: "Modulator Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 400,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "How fast the brightness falls away after the attack. A short mod decay with a long carrier decay is the whole trick behind FM electric pianos: bright strike, mellow tail."
+    },
+    {
+      id: "mod-sustain",
+      name: "Mod Sustain",
+      group: "Modulator Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.3,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "How much brightness remains while you hold the note. Low values keep held notes calm no matter how extreme the initial attack was."
+    },
+    {
+      id: "mod-release",
+      name: "Mod Release",
+      group: "Modulator Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 300,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How the overtones fade once you let go. Making this shorter than the carrier release means notes soften into pure sine as they die away."
+    }
+  ]
+};
+
+// src/dsp/fm-voice.ts
+var P_ALGO = 0;
+var P_OP_BASE = 1;
+var P_OP_STRIDE = 3;
+var P_INDEX = 13;
+var P_KEY_SCALE = 14;
+var P_FEEDBACK = 15;
+var P_SPREAD = 16;
+var P_BALANCE = 17;
+var P_AMP_A = 18;
+var P_MOD_A = 22;
+var N_OPS = 4;
+var MAX_ALGO = 4;
+var TAU = Math.PI * 2;
+var DENORM = 1e-20;
+var REF_HZ = 261.6256;
+var CARRIER_MASK = new Uint8Array([1, 1, 5, 15, 3]);
+var SPREAD_SEMIS = new Float32Array([0, 0.035, -0.026, 0.061]);
+function softClip(x) {
+  return x / (1 + (x < 0 ? -x : x));
+}
+function quantizeRatio(v) {
+  if (v < 0.75) return 0.5;
+  const r = Math.round(v);
+  return r < 1 ? 1 : r > 16 ? 16 : r;
+}
+var FmVoice = class {
+  params = new Float32Array(FM_DESCRIPTOR.params.length);
+  inc = new Float32Array(N_OPS);
+  level = new Float32Array(N_OPS);
+  carrierGain = new Float32Array(N_OPS);
+  envA;
+  envB;
+  envC;
+  envD;
+  indexSmooth;
+  fbSmooth;
+  sr;
+  baseFreq = 220;
+  velocity = 1;
+  active = false;
+  algo = 0;
+  carrierMask = 1;
+  keyScale = 1;
+  ph0 = 0;
+  ph1 = 0;
+  ph2 = 0;
+  ph3 = 0;
+  fbZ1 = 0;
+  fbZ2 = 0;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    this.envA = new Envelope(sampleRate2);
+    this.envB = new Envelope(sampleRate2);
+    this.envC = new Envelope(sampleRate2);
+    this.envD = new Envelope(sampleRate2);
+    this.indexSmooth = new Smoother(sampleRate2, 12);
+    this.fbSmooth = new Smoother(sampleRate2, 12);
+    for (let i = 0; i < FM_DESCRIPTOR.params.length; i++) {
+      this.params[i] = FM_DESCRIPTOR.params[i]?.default ?? 0;
+    }
+    this.applyRouting();
+    this.indexSmooth.snap(this.params[P_INDEX]);
+    this.fbSmooth.snap(this.params[P_FEEDBACK]);
+  }
+  setParam(index, value) {
+    if (index < 0 || index >= this.params.length) return;
+    this.params[index] = value;
+    if (index === P_ALGO) this.applyRouting();
+    else if (index >= P_AMP_A) this.applyEnvelopes();
+  }
+  applyRouting() {
+    const raw = this.params[P_ALGO];
+    const q = raw < 0 ? 0 : raw > MAX_ALGO ? MAX_ALGO : Math.round(raw);
+    this.algo = q;
+    this.carrierMask = CARRIER_MASK[q];
+    this.applyEnvelopes();
+  }
+  /** Carriers follow the amp ADSR, modulators the brightness ADSR. */
+  configure(env, bit) {
+    const base = (this.carrierMask & bit) !== 0 ? P_AMP_A : P_MOD_A;
+    env.set(
+      this.params[base],
+      this.params[base + 1],
+      this.params[base + 2],
+      this.params[base + 3]
+    );
+  }
+  applyEnvelopes() {
+    this.configure(this.envA, 1);
+    this.configure(this.envB, 2);
+    this.configure(this.envC, 4);
+    this.configure(this.envD, 8);
+  }
+  /** Block-rate work: operator increments, levels, carrier balance, key scaling. */
+  updateBlock() {
+    const spread = this.params[P_SPREAD];
+    for (let k = 0; k < N_OPS; k++) {
+      const b = P_OP_BASE + k * P_OP_STRIDE;
+      const ratio = quantizeRatio(this.params[b]);
+      const semis = this.params[b + 1] + SPREAD_SEMIS[k] * spread;
+      const f = this.baseFreq * ratio * Math.pow(2, semis / 12) / this.sr;
+      this.inc[k] = f > 0.45 ? 0.45 : f;
+      this.level[k] = this.params[b + 2];
+    }
+    const ks = Math.pow(REF_HZ / this.baseFreq, this.params[P_KEY_SCALE]);
+    this.keyScale = ks < 0.15 ? 0.15 : ks > 2.5 ? 2.5 : ks;
+    const mask = this.carrierMask;
+    let n = 0;
+    for (let k = 0; k < N_OPS; k++) if ((mask & 1 << k) !== 0) n++;
+    const tilt = this.params[P_BALANCE];
+    let rank = 0;
+    for (let k = 0; k < N_OPS; k++) {
+      if ((mask & 1 << k) === 0) {
+        this.carrierGain[k] = 0;
+        continue;
+      }
+      const p = n > 1 ? rank / (n - 1) : 0;
+      this.carrierGain[k] = (1 - tilt) * (1 - 0.85 * p) + tilt * (0.15 + 0.85 * p);
+      rank++;
+    }
+  }
+  noteOn(freq, velocity, voiceIndex) {
+    this.baseFreq = freq > 1 ? freq : 1;
+    this.velocity = velocity;
+    this.active = true;
+    const off = voiceIndex * 0.113 % 1;
+    this.ph0 = off;
+    this.ph1 = (off + 0.017) % 1;
+    this.ph2 = (off + 0.041) % 1;
+    this.ph3 = (off + 0.073) % 1;
+    this.fbZ1 = 0;
+    this.fbZ2 = 0;
+    this.applyRouting();
+    this.envA.trigger();
+    this.envB.trigger();
+    this.envC.trigger();
+    this.envD.trigger();
+    this.indexSmooth.snap(this.params[P_INDEX]);
+    this.fbSmooth.snap(this.params[P_FEEDBACK]);
+  }
+  noteOff() {
+    this.envA.release();
+    this.envB.release();
+    this.envC.release();
+    this.envD.release();
+  }
+  /** Finished once every carrier envelope has run out; modulators do not
+   *  hold a voice open because they make no sound of their own. */
+  isFinished() {
+    if (!this.active) return false;
+    const m = this.carrierMask;
+    if ((m & 1) !== 0 && !this.envA.isFinished()) return false;
+    if ((m & 2) !== 0 && !this.envB.isFinished()) return false;
+    if ((m & 4) !== 0 && !this.envC.isFinished()) return false;
+    if ((m & 8) !== 0 && !this.envD.isFinished()) return false;
+    return true;
+  }
+  render(out, offset, count) {
+    if (!this.active) return;
+    this.updateBlock();
+    const i0 = this.inc[0];
+    const i1 = this.inc[1];
+    const i2 = this.inc[2];
+    const i3 = this.inc[3];
+    const l0 = this.level[0];
+    const l1 = this.level[1];
+    const l2 = this.level[2];
+    const l3 = this.level[3];
+    const g0 = this.carrierGain[0];
+    const g1 = this.carrierGain[1];
+    const g2 = this.carrierGain[2];
+    const g3 = this.carrierGain[3];
+    const algo = this.algo;
+    const ks = this.keyScale;
+    const amp = this.velocity * 0.32;
+    this.indexSmooth.setTarget(this.params[P_INDEX]);
+    this.fbSmooth.setTarget(this.params[P_FEEDBACK]);
+    for (let n = 0; n < count; n++) {
+      const e0 = this.envA.next();
+      const e1 = this.envB.next();
+      const e2 = this.envC.next();
+      const e3 = this.envD.next();
+      const index = this.indexSmooth.next() * ks;
+      this.ph0 += i0;
+      if (this.ph0 >= 1) this.ph0 -= 1;
+      this.ph1 += i1;
+      if (this.ph1 >= 1) this.ph1 -= 1;
+      this.ph2 += i2;
+      if (this.ph2 >= 1) this.ph2 -= 1;
+      this.ph3 += i3;
+      if (this.ph3 >= 1) this.ph3 -= 1;
+      const fbArg = softClip((this.fbZ1 + this.fbZ2) * 0.5) * this.fbSmooth.next() * Math.PI;
+      const m3 = Math.sin(this.ph3 * TAU + fbArg) * l3 * e3;
+      this.fbZ2 = this.fbZ1 < DENORM && this.fbZ1 > -DENORM ? 0 : this.fbZ1;
+      this.fbZ1 = m3 < DENORM && m3 > -DENORM ? 0 : m3;
+      let y = 0;
+      if (algo === 0) {
+        const m1 = Math.sin(this.ph1 * TAU) * l1 * e1 * index;
+        y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0;
+      } else if (algo === 1) {
+        const m2 = Math.sin(this.ph2 * TAU) * l2 * e2 * index;
+        const m1 = Math.sin(this.ph1 * TAU + m2) * l1 * e1 * index;
+        y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0;
+      } else if (algo === 2) {
+        const m1 = Math.sin(this.ph1 * TAU) * l1 * e1 * index;
+        y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0 + Math.sin(this.ph2 * TAU + m3 * index) * l2 * e2 * g2;
+      } else if (algo === 3) {
+        y = Math.sin(this.ph0 * TAU) * l0 * e0 * g0 + Math.sin(this.ph1 * TAU) * l1 * e1 * g1 + Math.sin(this.ph2 * TAU) * l2 * e2 * g2 + m3 * g3;
+      } else {
+        const m2 = Math.sin(this.ph2 * TAU) * l2 * e2 * index;
+        y = Math.sin(this.ph0 * TAU + m2) * l0 * e0 * g0 + Math.sin(this.ph1 * TAU + m3 * index) * l1 * e1 * g1;
+      }
+      const s = y * amp;
+      out[offset + n] = out[offset + n] + (s === s ? s : 0);
+    }
+  }
+};
+var FmEngine = {
+  descriptor: FM_DESCRIPTOR,
+  allocVoice: (sampleRate2) => new FmVoice(sampleRate2)
+};
+
+// src/dsp/physical-descriptor.ts
+var PHYSICAL_DESCRIPTOR = {
+  id: "physical",
+  name: "Physical",
+  colour: "#FFD93D",
+  macroNames: ["Body", "Air", "Grit", "Motion"],
+  params: [
+    {
+      id: "material",
+      name: "Material",
+      group: "Body",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.62,
+      curve: "linear",
+      macro: 0,
+      macroDepth: 0.9,
+      mutability: 0.9,
+      explain: "Morphs the resonator between four real objects: drum head, wood bar, struck metal and glass. It reshapes the whole set of ringing frequencies, so it changes what the sound IS rather than how it is filtered."
+    },
+    {
+      id: "structure",
+      name: "Structure",
+      group: "Body",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.25,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Stretches the upper partials sharp, the way a stiff or thick object goes out of tune with itself. A little makes the body feel solid and real; a lot makes it clangy and bell-like."
+    },
+    {
+      id: "decay",
+      name: "Decay",
+      group: "Body",
+      unit: "ms",
+      min: 20,
+      max: 3e3,
+      default: 900,
+      curve: "exp",
+      mutability: 0.7,
+      explain: "How long the object rings after it is hit, before it falls silent. Short is a tap on a table, long is a struck cymbal left to ring out."
+    },
+    {
+      id: "damping",
+      name: "Damping",
+      group: "Body",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.35,
+      curve: "linear",
+      macro: 3,
+      macroDepth: 0.55,
+      mutability: 0.9,
+      explain: "Muffles the object, killing high partials much faster than low ones \u2014 exactly what happens when you rest a hand on a cymbal or wrap a drum in cloth. It makes a bright ring turn into a dull thud over time."
+    },
+    {
+      id: "position",
+      name: "Position",
+      group: "Body",
+      unit: "pct",
+      min: 0.02,
+      max: 0.98,
+      default: 0.28,
+      curve: "linear",
+      mutability: 0.9,
+      explain: "Where on the object you strike it. Near the edge you wake up the higher, thinner partials; nearer the middle you get the fat fundamental. It is the difference between a rim shot and a centre hit."
+    },
+    {
+      id: "air",
+      name: "Air",
+      group: "Body",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.55,
+      curve: "linear",
+      macro: 1,
+      macroDepth: 0.7,
+      mutability: 0.9,
+      explain: "How many partials the object is allowed to ring with, and how loud the high ones are. Low is a small dead object, high is a big shimmering one with lots of overtones in the air."
+    },
+    {
+      id: "exciter-type",
+      name: "Exciter",
+      group: "Exciter",
+      unit: "none",
+      min: 0,
+      max: 2,
+      default: 0,
+      curve: "stepped",
+      steps: 3,
+      mutability: 0.5,
+      explain: "What sets the object moving: a mallet strike, a burst of noise like a scrape, or a continuous bow that keeps feeding it energy for as long as you hold the note."
+    },
+    {
+      id: "grit",
+      name: "Grit",
+      group: "Exciter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.4,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.6,
+      mutability: 0.9,
+      explain: "How rough and noisy the contact is. Turn it up for scratchy, dirty, hand-made attacks; turn it down for a clean, polished, almost synthetic hit."
+    },
+    {
+      id: "hardness",
+      name: "Hardness",
+      group: "Exciter",
+      unit: "ms",
+      min: 0.2,
+      max: 80,
+      default: 3,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "How long the exciter stays in contact with the object. A very short contact is a hard stick and sounds bright and clicky; a long one is a soft felt beater and only wakes the low partials."
+    },
+    {
+      id: "exciter-tone",
+      name: "Exciter Tone",
+      group: "Exciter",
+      unit: "hz",
+      min: 200,
+      max: 16e3,
+      default: 4500,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "Filters the exciter before it reaches the object, deciding which partials it is able to wake up. Lower it for a soft muted knock, raise it for a sharp bright crack."
+    },
+    {
+      id: "release",
+      name: "Release",
+      group: "Exciter",
+      unit: "ms",
+      min: 5,
+      max: 2e3,
+      default: 120,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How quickly the bow lifts off when you let go of the note. It only matters for the bowed exciter, where you are feeding the object continuously and have to stop."
+    },
+    {
+      id: "level",
+      name: "Level",
+      group: "Output",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.75,
+      curve: "linear",
+      mutability: 0.4,
+      explain: "Output volume of the voice, with gentle saturation as it is pushed. Useful for balancing this engine against the others rather than for shaping the sound."
+    }
+  ]
+};
+
+// src/dsp/physical-voice.ts
+var P_MATERIAL = 0;
+var P_STRUCTURE = 1;
+var P_DECAY2 = 2;
+var P_DAMPING = 3;
+var P_POSITION = 4;
+var P_AIR = 5;
+var P_EXCITER = 6;
+var P_GRIT = 7;
+var P_HARDNESS = 8;
+var P_TONE = 9;
+var P_RELEASE2 = 10;
+var P_LEVEL = 11;
+var EX_MALLET = 0;
+var EX_NOISE = 1;
+var EX_BOW = 2;
+var MAX_MODES = 20;
+var MATERIALS = 4;
+var DENORMAL2 = 1e-20;
+var R_MAX = 0.99997;
+var LN1000 = 6.907755278982137;
+var TWO_PI = 6.283185307179586;
+var RATIOS = new Float32Array([
+  // membrane: circular drum head, stretched and strongly inharmonic
+  1,
+  1.593,
+  2.135,
+  2.295,
+  2.653,
+  2.917,
+  3.155,
+  3.5,
+  3.598,
+  3.652,
+  3.965,
+  4.06,
+  4.23,
+  4.372,
+  4.601,
+  4.831,
+  4.903,
+  5.084,
+  5.242,
+  5.412,
+  // wood: bar-like, wide spacing, upper partials die almost immediately
+  1,
+  2.9,
+  5.8,
+  8.9,
+  12.4,
+  15.9,
+  19.8,
+  23.6,
+  27.9,
+  32.1,
+  36.7,
+  41.3,
+  46.3,
+  51.3,
+  56.6,
+  62,
+  67.6,
+  73.4,
+  79.3,
+  85.4,
+  // metal: struck bell, the classic inharmonic set
+  1,
+  2,
+  2.4,
+  3,
+  3.61,
+  4.17,
+  5.43,
+  6.8,
+  8.21,
+  9.75,
+  11.4,
+  13.2,
+  15.1,
+  17.2,
+  19.4,
+  21.7,
+  24.2,
+  26.8,
+  29.5,
+  32.4,
+  // glass: near-harmonic and slightly stretched, bright and long
+  1,
+  2.01,
+  3.03,
+  4.06,
+  5.11,
+  6.17,
+  7.25,
+  8.35,
+  9.47,
+  10.6,
+  11.8,
+  13,
+  14.2,
+  15.5,
+  16.8,
+  18.1,
+  19.5,
+  20.9,
+  22.3,
+  23.8
+]);
+var AMP_TILT = new Float32Array([0.8, 1.15, 0.55, 0.45]);
+var DECAY_TILT = new Float32Array([1.2, 1.7, 0.55, 0.35]);
+var DECAY_SCALE = new Float32Array([0.55, 0.28, 1.25, 1.5]);
+function clamp(x, lo, hi) {
+  return x < lo ? lo : x > hi ? hi : x === x ? x : lo;
+}
+var PhysicalVoice = class {
+  a1 = new Float32Array(MAX_MODES);
+  a2 = new Float32Array(MAX_MODES);
+  b0 = new Float32Array(MAX_MODES);
+  y1 = new Float32Array(MAX_MODES);
+  y2 = new Float32Array(MAX_MODES);
+  params = new Float32Array(PHYSICAL_DESCRIPTOR.params.length);
+  excEnv;
+  excFilter;
+  driveSmooth;
+  sr;
+  activeModes = 0;
+  bowScale = 1;
+  baseFreq = 220;
+  velocity = 1;
+  active = false;
+  dirty = true;
+  needsSnap = true;
+  quietBlocks = 0;
+  rng = 22222;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    this.excEnv = new Envelope(sampleRate2);
+    this.excFilter = new LadderFilter(sampleRate2);
+    this.driveSmooth = new Smoother(sampleRate2, 12);
+    for (let i = 0; i < this.params.length; i++) {
+      this.params[i] = PHYSICAL_DESCRIPTOR.params[i]?.default ?? 0;
+    }
+    this.applyExciter();
+  }
+  setParam(index, value) {
+    if (index < 0 || index >= this.params.length) return;
+    this.params[index] = value;
+    this.dirty = true;
+    if (index === P_EXCITER || index === P_HARDNESS || index === P_RELEASE2) {
+      this.applyExciter();
+    }
+  }
+  applyExciter() {
+    const type = Math.round(clamp(this.params[P_EXCITER], 0, 2));
+    const hard = clamp(this.params[P_HARDNESS], 0.2, 80);
+    const rel = clamp(this.params[P_RELEASE2], 5, 2e3);
+    if (type === EX_BOW) {
+      this.excEnv.set(8 + hard * 3, 60, 1, rel);
+    } else if (type === EX_NOISE) {
+      this.excEnv.set(0.5 + hard * 0.4, hard * 2.5, 0, hard);
+    } else {
+      this.excEnv.set(0.2 + hard * 0.3, hard, 0, hard);
+    }
+  }
+  /** Recomputes the whole modal bank. Never runs inside the sample loop. */
+  updateModes() {
+    this.dirty = false;
+    const morph = clamp(this.params[P_MATERIAL], 0, 1) * (MATERIALS - 1);
+    let i0 = Math.floor(morph);
+    if (i0 > MATERIALS - 2) i0 = MATERIALS - 2;
+    if (i0 < 0) i0 = 0;
+    const f = morph - i0;
+    const o0 = i0 * MAX_MODES;
+    const o1 = o0 + MAX_MODES;
+    const ampTilt = AMP_TILT[i0] + (AMP_TILT[i0 + 1] - AMP_TILT[i0]) * f;
+    const decTilt = DECAY_TILT[i0] + (DECAY_TILT[i0 + 1] - DECAY_TILT[i0]) * f;
+    const decScale = DECAY_SCALE[i0] + (DECAY_SCALE[i0 + 1] - DECAY_SCALE[i0]) * f;
+    const stretch = clamp(this.params[P_STRUCTURE], 0, 1);
+    const damping = clamp(this.params[P_DAMPING], 0, 1);
+    const air = clamp(this.params[P_AIR], 0, 1);
+    const pos = clamp(this.params[P_POSITION], 0.02, 0.98);
+    const t60 = clamp(this.params[P_DECAY2], 20, 3e3) / 1e3 * (1 - 0.55 * damping);
+    const decayExp = decTilt + damping * 1.6;
+    const ampExp = (air - 0.5) * 1.4;
+    const nyquist = this.sr * 0.47;
+    const wScale = TWO_PI / this.sr;
+    let want = 3 + Math.round(air * (MAX_MODES - 3));
+    if (want > MAX_MODES) want = MAX_MODES;
+    let count = 0;
+    let gainSum = 0;
+    let noisePower = 0;
+    for (let k = 0; k < want; k++) {
+      const base = RATIOS[o0 + k] + (RATIOS[o1 + k] - RATIOS[o0 + k]) * f;
+      const ratio = base * (1 + stretch * 0.05 * (base - 1));
+      const freq = this.baseFreq * ratio;
+      if (freq >= nyquist || freq < 5) break;
+      const w = freq * wScale;
+      const t60k = clamp(t60 * decScale * Math.pow(ratio, -decayExp), 2e-3, 8);
+      let r = Math.exp(-LN1000 / (t60k * this.sr));
+      if (!(r > 0)) r = 0;
+      if (r > R_MAX) r = R_MAX;
+      const gain = Math.pow(k + 1, -ampTilt) * Math.pow(ratio, ampExp) * (0.12 + 0.88 * Math.abs(Math.sin(Math.PI * pos * ratio)));
+      this.a1[k] = 2 * r * Math.cos(w);
+      this.a2[k] = -r * r;
+      this.b0[k] = gain * Math.sin(w);
+      gainSum += gain;
+      noisePower += gain * gain / (4 * (1 - r));
+      count = k + 1;
+    }
+    const norm = 1.2 * Math.sqrt((count + 1) / 8) / (1e-3 + gainSum);
+    for (let k = 0; k < count; k++) this.b0[k] = this.b0[k] * norm;
+    for (let k = count; k < MAX_MODES; k++) {
+      this.b0[k] = 0;
+      this.y1[k] = 0;
+      this.y2[k] = 0;
+    }
+    this.activeModes = count;
+    this.bowScale = 1.8 / (0.05 + norm * Math.sqrt(noisePower));
+  }
+  resetModes() {
+    for (let k = 0; k < MAX_MODES; k++) {
+      this.y1[k] = 0;
+      this.y2[k] = 0;
+    }
+  }
+  noteOn(freq, velocity, voiceIndex) {
+    this.baseFreq = clamp(freq, 8, this.sr * 0.4);
+    this.velocity = clamp(velocity, 0, 1);
+    this.active = true;
+    this.dirty = true;
+    this.needsSnap = true;
+    this.quietBlocks = 0;
+    this.rng = 22222 + voiceIndex * 7919;
+    this.resetModes();
+    this.excFilter.reset();
+    this.applyExciter();
+    this.excEnv.trigger();
+  }
+  noteOff() {
+    this.excEnv.release();
+  }
+  isFinished() {
+    return this.active && this.quietBlocks >= 3;
+  }
+  render(out, offset, count) {
+    if (!this.active) return;
+    if (this.dirty) this.updateModes();
+    const a1 = this.a1;
+    const a2 = this.a2;
+    const b0 = this.b0;
+    const y1 = this.y1;
+    const y2 = this.y2;
+    const n = this.activeModes;
+    const type = Math.round(clamp(this.params[P_EXCITER], 0, 2));
+    const grit = clamp(this.params[P_GRIT], 0, 1);
+    const air = clamp(this.params[P_AIR], 0, 1);
+    const tone = clamp(this.params[P_TONE], 200, 16e3);
+    const dc = type === EX_MALLET ? 1 : type === EX_NOISE ? 0.2 : 0;
+    const noiseAmt = type === EX_MALLET ? grit * 0.7 : 1;
+    const rootTau = Math.sqrt(clamp(this.params[P_HARDNESS], 0.2, 80) * this.sr / 4e3);
+    const drive = type === EX_BOW ? this.bowScale : type === EX_NOISE ? 2.2 / (1 + 0.35 * rootTau) : 1.6 / (1 + 0.9 * rootTau);
+    const level = clamp(this.params[P_LEVEL], 0, 1) * this.velocity * 0.34;
+    this.excFilter.setCutoff(tone * (0.35 + 1.2 * grit) * (0.55 + air));
+    this.excFilter.setResonance(grit * 0.25);
+    this.driveSmooth.setTarget(drive);
+    if (this.needsSnap) {
+      this.driveSmooth.snap(drive);
+      this.needsSnap = false;
+    }
+    let rs = this.rng;
+    let peak = 0;
+    let excPeak = 0;
+    for (let i = 0; i < count; i++) {
+      rs ^= rs << 13;
+      rs ^= rs >>> 17;
+      rs ^= rs << 5;
+      const noise = rs * 4656612873077393e-25;
+      const e = this.excEnv.next();
+      if (e > excPeak) excPeak = e;
+      const x = this.excFilter.process((dc + noiseAmt * noise) * e) * this.driveSmooth.next();
+      let acc = 0;
+      for (let m = 0; m < n; m++) {
+        const y = b0[m] * x + a1[m] * y1[m] + a2[m] * y2[m];
+        y2[m] = y1[m];
+        y1[m] = y;
+        acc += y;
+      }
+      if (acc !== acc) {
+        this.resetModes();
+        acc = 0;
+      }
+      const mag = acc < 0 ? -acc : acc;
+      if (mag > peak) peak = mag;
+      const v = Math.tanh(acc * level) * 0.9;
+      out[offset + i] = out[offset + i] + v;
+    }
+    for (let m = 0; m < n; m++) {
+      if (y1[m] < DENORMAL2 && y1[m] > -DENORMAL2) y1[m] = 0;
+      if (y2[m] < DENORMAL2 && y2[m] > -DENORMAL2) y2[m] = 0;
+    }
+    this.rng = rs;
+    if (peak < 1e-4 && excPeak < 1e-4) this.quietBlocks++;
+    else this.quietBlocks = 0;
+  }
+};
+var PhysicalEngine = {
+  descriptor: PHYSICAL_DESCRIPTOR,
+  allocVoice: (sampleRate2) => new PhysicalVoice(sampleRate2)
+};
+
+// src/dsp/granular-descriptor.ts
+var GRANULAR_DESCRIPTOR = {
+  id: "granular",
+  name: "Granular",
+  colour: "#8B5CF6",
+  macroNames: ["Body", "Air", "Grit", "Motion"],
+  params: [
+    {
+      id: "grain-density",
+      name: "Density",
+      group: "Cloud",
+      unit: "hz",
+      min: 0.5,
+      max: 200,
+      default: 32,
+      curve: "exp",
+      macro: 3,
+      macroDepth: 0.7,
+      mutability: 0.9,
+      explain: "How many grains are thrown per second. Low counts sound like scattered droplets you can hear individually; high counts fuse into one continuous, thick texture."
+    },
+    {
+      id: "grain-size",
+      name: "Grain Size",
+      group: "Cloud",
+      unit: "ms",
+      min: 5,
+      max: 400,
+      default: 90,
+      curve: "exp",
+      macro: 0,
+      macroDepth: 0.6,
+      mutability: 0.8,
+      explain: "How long each slice of sound lasts. Tiny grains lose their pitch and turn into buzzing texture; long grains keep the character of the source and sound smooth and vocal."
+    },
+    {
+      id: "position",
+      name: "Position",
+      group: "Source",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.12,
+      curve: "linear",
+      macro: 1,
+      macroDepth: 0.8,
+      mutability: 0.9,
+      explain: "Where in the source material the grains are read from. Moving it walks you through different timbres, from dark and thick at one end to bright and airy at the other."
+    },
+    {
+      id: "spray",
+      name: "Spray",
+      group: "Source",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.12,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.7,
+      mutability: 0.9,
+      explain: "Scatters each grain randomly around the read position instead of taking them all from the same spot. A little stops the cloud sounding like a stuck loop; a lot smears everything into noise."
+    },
+    {
+      id: "pitch-scatter",
+      name: "Pitch Scatter",
+      group: "Source",
+      unit: "semitones",
+      min: 0,
+      max: 12,
+      default: 0.25,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Detunes every grain by a random amount. Small values thicken the note like a chorus; large values spray it into a shimmering, atonal cloud that no longer has one clear pitch."
+    },
+    {
+      id: "reverse",
+      name: "Reverse",
+      group: "Source",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.1,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "The chance that any given grain plays backwards. Mixed in small amounts it removes the forward push of the sound and makes the texture feel suspended rather than moving."
+    },
+    {
+      id: "window-shape",
+      name: "Window",
+      group: "Cloud",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 1,
+      curve: "linear",
+      mutability: 0.6,
+      explain: "How gently each grain fades in and out. Fully up is a soft bell shape that sounds smooth; turned down the grains hold flat for longer, which sounds punchier and more percussive."
+    },
+    {
+      id: "amp-attack",
+      name: "Attack",
+      group: "Envelope",
+      unit: "ms",
+      min: 0.5,
+      max: 4e3,
+      default: 25,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the whole cloud takes to reach full volume. Long attacks let the grains gather gradually, which is what turns this engine into a slow-blooming pad."
+    },
+    {
+      id: "amp-decay",
+      name: "Decay",
+      group: "Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 700,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How quickly the cloud settles from its loudest point down to the level it holds at while the key is down."
+    },
+    {
+      id: "amp-sustain",
+      name: "Sustain",
+      group: "Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.75,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "The level the cloud holds while you keep the key down. Drop it to zero and each note becomes a single burst of grains rather than a sustained texture."
+    },
+    {
+      id: "amp-release",
+      name: "Release",
+      group: "Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 900,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the cloud takes to disperse after you let go. Long releases let overlapping notes blur into a continuous wash, which is most of the appeal of granular sound."
+    }
+  ]
+};
+
+// src/dsp/granular-voice.ts
+var P_DENSITY = 0;
+var P_SIZE = 1;
+var P_POSITION2 = 2;
+var P_SPRAY = 3;
+var P_PITCH_SCATTER = 4;
+var P_REVERSE = 5;
+var P_WINDOW = 6;
+var P_ATTACK2 = 7;
+var P_DECAY3 = 8;
+var P_SUSTAIN2 = 9;
+var P_RELEASE3 = 10;
+var MAX_GRAINS = 32;
+var DENORMAL3 = 1e-20;
+var TWO_PI2 = 6.283185307179586;
+var SOURCE_SR = 48e3;
+var SOURCE_SECONDS = 3;
+var SOURCE_ROOT_HZ = 110;
+var RISE_STEPS = 1024;
+var RISE = new Float32Array(RISE_STEPS + 1);
+for (let i = 0; i <= RISE_STEPS; i++) {
+  RISE[i] = 0.5 - 0.5 * Math.cos(Math.PI * i / RISE_STEPS);
+}
+function rise(x) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const f = x * RISE_STEPS;
+  const i = f | 0;
+  const a = RISE[i];
+  const b = RISE[i + 1];
+  return a + (b - a) * (f - i);
+}
+function grainWindow(phase, taper) {
+  if (phase <= 0 || phase >= 1) return 0;
+  if (phase < taper) return rise(phase / taper);
+  if (phase > 1 - taper) return rise((1 - phase) / taper);
+  return 1;
+}
+function saturate3(x) {
+  const x2 = x * x;
+  return x * (27 + x2) / (27 + 9 * x2);
+}
+var sourceBuffer = null;
+function getSource() {
+  if (sourceBuffer) return sourceBuffer;
+  const len = SOURCE_SR * SOURCE_SECONDS;
+  const buf = new Float32Array(len);
+  const s1 = new SawOscillator(SOURCE_SR), s2 = new SawOscillator(SOURCE_SR);
+  const s3 = new SawOscillator(SOURCE_SR), noiseFilter = new LadderFilter(SOURCE_SR);
+  noiseFilter.setResonance(0.3);
+  let rng = 2654435769;
+  let peak = 1e-9;
+  for (let i = 0; i < len; i++) {
+    const t = i / len;
+    const wob = Math.sin(t * TWO_PI2 * 3) * 4e-3;
+    s1.setFrequency(SOURCE_ROOT_HZ);
+    s2.setFrequency(SOURCE_ROOT_HZ * (1.006 + wob));
+    s3.setFrequency(SOURCE_ROOT_HZ * 2 * (0.994 - wob));
+    rng ^= rng << 13;
+    rng >>>= 0;
+    rng ^= rng >>> 17;
+    rng ^= rng << 5;
+    rng >>>= 0;
+    const noise = rng / 4294967296 * 2 - 1;
+    noiseFilter.setCutoff(300 * Math.pow(2, 4.5 * (0.5 - 0.5 * Math.cos(t * TWO_PI2 * 2))));
+    const air = 0.2 + 0.28 * (0.5 - 0.5 * Math.cos(t * TWO_PI2 * 5));
+    const v = (s1.next() + s2.next() + s3.next() * 0.6) * 0.32 + noiseFilter.process(noise) * air * 1.1;
+    buf[i] = v;
+    if (v > peak) peak = v;
+    else if (-v > peak) peak = -v;
+  }
+  const norm = 0.9 / peak;
+  for (let i = 0; i < len; i++) buf[i] = buf[i] * norm;
+  sourceBuffer = buf;
+  return buf;
+}
+var GranularVoice = class {
+  params = new Float32Array(GRANULAR_DESCRIPTOR.params.length);
+  ampEnv;
+  posSmooth;
+  densitySmooth;
+  gActive = new Uint8Array(MAX_GRAINS);
+  gPos = new Float64Array(MAX_GRAINS);
+  // read head, samples
+  gInc = new Float64Array(MAX_GRAINS);
+  // rate, negative = reverse
+  gAge = new Float64Array(MAX_GRAINS);
+  gLen = new Float64Array(MAX_GRAINS);
+  gTaper = new Float32Array(MAX_GRAINS);
+  gGainL = new Float32Array(MAX_GRAINS);
+  gGainR = new Float32Array(MAX_GRAINS);
+  src;
+  srcLen;
+  sr;
+  invSr;
+  srcRateRatio;
+  rng = 1;
+  spawnAccum = 0;
+  pitchRatio = 1;
+  velocity = 1;
+  active = false;
+  dcX1 = 0;
+  dcY1 = 0;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    this.invSr = 1 / sampleRate2;
+    this.src = getSource();
+    this.srcLen = this.src.length;
+    this.srcRateRatio = SOURCE_SR / sampleRate2;
+    this.ampEnv = new Envelope(sampleRate2);
+    this.posSmooth = new Smoother(sampleRate2, 25);
+    this.densitySmooth = new Smoother(sampleRate2, 40);
+    for (let i = 0; i < this.params.length; i++) {
+      this.params[i] = GRANULAR_DESCRIPTOR.params[i]?.default ?? 0;
+    }
+    this.posSmooth.snap(this.params[P_POSITION2]);
+    this.densitySmooth.snap(this.params[P_DENSITY]);
+  }
+  /** xorshift32. Seeded per voice so a rendered patch is reproducible. */
+  rand() {
+    let x = this.rng;
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    this.rng = x;
+    return x / 4294967296;
+  }
+  setParam(index, value) {
+    if (index < 0 || index >= this.params.length) return;
+    this.params[index] = value;
+    if (index === P_ATTACK2 || index === P_DECAY3 || index === P_SUSTAIN2 || index === P_RELEASE3) {
+      this.applyEnvelope();
+    }
+  }
+  applyEnvelope() {
+    this.ampEnv.set(
+      this.params[P_ATTACK2],
+      this.params[P_DECAY3],
+      this.params[P_SUSTAIN2],
+      this.params[P_RELEASE3]
+    );
+  }
+  noteOn(freq, velocity, voiceIndex) {
+    this.velocity = velocity;
+    this.active = true;
+    this.pitchRatio = freq / SOURCE_ROOT_HZ;
+    this.rng = (voiceIndex * 2654435761 ^ 1542469173) >>> 0 || 1;
+    this.spawnAccum = 1;
+    this.dcX1 = 0;
+    this.dcY1 = 0;
+    this.gActive.fill(0);
+    this.applyEnvelope();
+    this.ampEnv.trigger();
+    this.posSmooth.snap(this.params[P_POSITION2]);
+    this.densitySmooth.snap(this.params[P_DENSITY]);
+  }
+  noteOff() {
+    this.ampEnv.release();
+  }
+  isFinished() {
+    return this.active && this.ampEnv.isFinished();
+  }
+  spawn(posNorm, sizeSamples) {
+    let slot = -1;
+    for (let g = 0; g < MAX_GRAINS; g++) {
+      if (this.gActive[g] === 0) {
+        slot = g;
+        break;
+      }
+    }
+    if (slot < 0) return;
+    const len = this.srcLen;
+    const spray = clamp2(this.params[P_SPRAY], 0, 1);
+    let start = (clamp2(posNorm, 0, 1) + (this.rand() * 2 - 1) * spray) * len;
+    start %= len;
+    if (start < 0) start += len;
+    const scatter = clamp2(this.params[P_PITCH_SCATTER], 0, 12);
+    const cents = (this.rand() * 2 - 1) * scatter;
+    let inc = this.pitchRatio * this.srcRateRatio * Math.pow(2, cents / 12);
+    if (inc > 16) inc = 16;
+    if (this.rand() < clamp2(this.params[P_REVERSE], 0, 1)) inc = -inc;
+    let dur = sizeSamples * (1 + (this.rand() * 2 - 1) * 0.15 * spray);
+    if (dur < 8) dur = 8;
+    const pan = this.rand();
+    const shape = clamp2(this.params[P_WINDOW], 0, 1);
+    this.gActive[slot] = 1;
+    this.gPos[slot] = start;
+    this.gInc[slot] = inc;
+    this.gAge[slot] = 0;
+    this.gLen[slot] = dur;
+    this.gTaper[slot] = 0.05 + 0.45 * shape;
+    this.gGainL[slot] = Math.cos(pan * Math.PI * 0.5) * 0.45;
+    this.gGainR[slot] = Math.sin(pan * Math.PI * 0.5) * 0.45;
+  }
+  render(out, offset, count) {
+    if (!this.active) return;
+    const src = this.src;
+    const len = this.srcLen;
+    const sizeSamples = clamp2(this.params[P_SIZE], 1, 4e3) * 1e-3 * this.sr;
+    this.posSmooth.setTarget(clamp2(this.params[P_POSITION2], 0, 1));
+    this.densitySmooth.setTarget(clamp2(this.params[P_DENSITY], 0, 400));
+    for (let i = 0; i < count; i++) {
+      const pos = this.posSmooth.next();
+      this.spawnAccum += this.densitySmooth.next() * this.invSr;
+      if (this.spawnAccum >= 1) {
+        this.spawnAccum -= 1;
+        if (this.spawnAccum > 1) this.spawnAccum = 1;
+        this.spawn(pos, sizeSamples);
+      }
+      let sumL = 0;
+      let sumR = 0;
+      for (let g = 0; g < MAX_GRAINS; g++) {
+        if (this.gActive[g] === 0) continue;
+        const age = this.gAge[g];
+        const glen = this.gLen[g];
+        if (age >= glen) {
+          this.gActive[g] = 0;
+          continue;
+        }
+        let p = this.gPos[g];
+        const i0 = p | 0;
+        let i1 = i0 + 1;
+        if (i1 >= len) i1 = 0;
+        const a = src[i0];
+        const b = src[i1];
+        const s = (a + (b - a) * (p - i0)) * grainWindow(age / glen, this.gTaper[g]);
+        sumL += s * this.gGainL[g];
+        sumR += s * this.gGainR[g];
+        p += this.gInc[g];
+        if (p >= len) p -= len;
+        else if (p < 0) p += len;
+        this.gPos[g] = p;
+        this.gAge[g] = age + 1;
+      }
+      const mono = (sumL + sumR) * 0.7071067811865476;
+      let hp = mono - this.dcX1 + 0.995 * this.dcY1;
+      if (hp < DENORMAL3 && hp > -DENORMAL3) hp = 0;
+      this.dcX1 = mono < DENORMAL3 && mono > -DENORMAL3 ? 0 : mono;
+      this.dcY1 = hp;
+      const y = saturate3(hp * 0.7) * this.ampEnv.next() * this.velocity * 0.9;
+      out[offset + i] = out[offset + i] + (y === y ? y : 0);
+    }
+  }
+};
+function clamp2(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+var GranularEngine = {
+  descriptor: GRANULAR_DESCRIPTOR,
+  allocVoice: (sampleRate2) => new GranularVoice(sampleRate2)
+};
+
 // src/dsp/registry.ts
-var ENGINES = [AnalogEngine];
+var ENGINES = [
+  AnalogEngine,
+  FmEngine,
+  PhysicalEngine,
+  GranularEngine
+];
 var DEFAULT_ENGINE_ID = "analog";
 
 // src/audio/param-transport.ts

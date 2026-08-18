@@ -81,9 +81,9 @@ function getSource(): Float32Array {
     rng ^= rng << 13; rng >>>= 0; rng ^= rng >>> 17; rng ^= rng << 5; rng >>>= 0;
     const noise = (rng / 4294967296) * 2 - 1;
     noiseFilter.setCutoff(300 * Math.pow(2, 4.5 * (0.5 - 0.5 * Math.cos(t * TWO_PI * 2))));
-    const air = 0.25 + 0.35 * (0.5 - 0.5 * Math.cos(t * TWO_PI * 5));
-    const v = (s1.next() + s2.next() + s3.next() * 0.6) * 0.3
-      + noiseFilter.process(noise) * air * 1.6;
+    const air = 0.2 + 0.28 * (0.5 - 0.5 * Math.cos(t * TWO_PI * 5));
+    const v = (s1.next() + s2.next() + s3.next() * 0.6) * 0.32
+      + noiseFilter.process(noise) * air * 1.1;
     buf[i] = v;
     if (v > peak) peak = v; else if (-v > peak) peak = -v;
   }
@@ -278,7 +278,7 @@ class GranularVoice implements EngineVoice {
       this.dcX1 = mono < DENORMAL && mono > -DENORMAL ? 0 : mono;
       this.dcY1 = hp;
 
-      const y = saturate(hp * 0.55) * this.ampEnv.next() * this.velocity * 0.9;
+      const y = saturate(hp * 0.7) * this.ampEnv.next() * this.velocity * 0.9;
       out[offset + i] = (out[offset + i] as number) + (y === y ? y : 0);
     }
   }

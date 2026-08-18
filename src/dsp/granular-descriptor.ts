@@ -20,7 +20,7 @@ export const GRANULAR_DESCRIPTOR: EngineDescriptor = {
     },
     {
       id: 'position', name: 'Position', group: 'Source', unit: 'pct',
-      min: 0, max: 1, default: 0.25, curve: 'linear', macro: 1, macroDepth: 0.8,
+      min: 0, max: 1, default: 0.12, curve: 'linear', macro: 1, macroDepth: 0.8,
       mutability: 0.9,
       explain: 'Where in the source material the grains are read from. Moving it walks you through different timbres, from dark and thick at one end to bright and airy at the other.',
     },

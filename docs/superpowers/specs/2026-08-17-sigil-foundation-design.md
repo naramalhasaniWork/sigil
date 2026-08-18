@@ -302,7 +302,34 @@ Prisma + Postgres, Auth.js with an OAuth provider. Server components by default.
 
 ---
 
+## 4.5 Mobile is a primary surface
+
+Revised 2026-08-17 on naram's direction: the iPhone is where this gets played, not a
+degraded fallback. Consequences that shape the build:
+
+- **The playing surface on mobile is a 4x4 pad grid**, not a piano strip — thumbs, not
+  cursors. Pads are in-scale so a wrong note is impossible, with a chord mode that plays
+  diatonic chords per degree. It deliberately echoes the KO II's own layout.
+- **Multitouch is a correctness requirement**, not a nicety: each pointer maps to the pad it
+  started on, so chords sound and slides glissando.
+- **Gesture control is primary input on mobile** — the XY pad and camera hand tracking are
+  how you shape sound without knobs.
+
+### iOS realities that constrain the design
+
+| Reality | Consequence |
+|---|---|
+| Web Audio obeys the **physical silent switch**. Ringer off means total silence and an app that looks broken. | The UI must detect a running context producing signal with no audible output path and warn explicitly. This is the single most likely "it's broken" report. |
+| `MediaRecorder` produces MP4/AAC on iOS, never WAV. | Live recording cannot be the chord-capture path. **Offline bounce through our own WAV encoder is the primary capture route** — it is also the only one that yields true 16-bit WAV for the KO II. |
+| No WebMIDI on iOS. | Pads and gestures are the input surface; MIDI is a desktop bonus. |
+| `getUserMedia` requires HTTPS. | Camera hand control works on Railway, and on desktop only via localhost. |
+| AudioContext requires a user gesture and starts suspended. | Power button stays as the explicit entry point. |
+
 ## 5. Bounce pipeline
+
+**Chords bounce, not just single notes.** The bounce takes a set of MIDI notes, so whatever
+you are holding — or the chord pad you just hit — renders as one sample. Saving a chord must
+be one tap, because that is the material that actually ends up on a KO II pad.
 
 1. Render offline via `OfflineAudioContext`, ideally at the KO II's native **46 875 Hz**.
    Safari has historically restricted non-standard offline rates — so: attempt native, and
