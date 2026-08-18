@@ -1,0 +1,42 @@
+# Guards the one thing that cannot be caught by reading code: that the C++ port
+# and the TypeScript still make the same sound.
+#
+# The mechanism is regenerate-then-compare. Goldens are rendered fresh from the
+# CURRENT TypeScript on every run, then the C++ is measured against them. Change
+# a filter coefficient in TS and this goes red until the C++ is changed to match.
+# Checking in goldens and trusting them would defeat the entire point — they
+# would drift with the code that produced them and nobody would notice.
+name: parity
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: npx tsc --noEmit
+      - run: pnpm test
+
+  parity:
+    # macOS because the plugin target is macOS; the DSP itself is portable and
+    # would pass on Linux too, but building what we actually ship is the point.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Regenerates goldens from the current TypeScript, then measures the C++
+      # against them. This is the drift gate.
+      - run: pnpm run drift

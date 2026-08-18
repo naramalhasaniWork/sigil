@@ -13,7 +13,8 @@
     "goldens:check": "node scripts/golden.mjs --check",
     "parity": "cmake -S native -B native/build && cmake --build native/build -j8 && ./native/build/sigil_parity",
     "test:watch": "NODE_OPTIONS=--expose-gc vitest",
-    "desktop": "node scripts/desktop.mjs"
+    "desktop": "node scripts/desktop.mjs",
+    "drift": "npm run goldens && npm run parity"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
