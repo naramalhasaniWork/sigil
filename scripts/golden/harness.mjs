@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const SRC = join(ROOT, 'src');
-export const OUT_DIR = join(ROOT, 'native/goldens');
+export const OUT_DIR = process.env.SIGIL_GOLDEN_OUT
+  ? resolve(process.env.SIGIL_GOLDEN_OUT)
+  : join(ROOT, 'native/goldens');
 export const SR = 48000;
 
 /**
@@ -145,7 +147,19 @@ export function blockSizes(total, pattern) {
 // ---------------------------------------------------------------------------
 
 const cases = [];
+const assets = [];
 const files = new Map();
+
+/**
+ * Write a shared binary the C++ rig loads as INPUT MATERIAL rather than as a
+ * comparison target — e.g. the sample buffer injected into the sampler engine.
+ * Keeps every case reproducible without the port having to synthesise anything.
+ */
+export function emitAsset(name, data, notes = '') {
+  const f = writeF32(`${name}.f32`, data);
+  assets.push({ name, ...f, notes });
+  return f;
+}
 
 function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
@@ -197,6 +211,7 @@ export function emit(c) {
     input: inFile ? { ...inFile, channels: ins.length, frames: ins[0].length } : null,
     tolClass: c.tol,
     tolerance: TOL[c.tol],
+    asset: c.asset ?? null,
     params: c.params ?? {},
     notes: c.notes ?? '',
   });
@@ -216,6 +231,7 @@ export function flushAll() {
   mkdirSync(OUT_DIR, { recursive: true });
   for (const [name, buf] of files) writeFileSync(join(OUT_DIR, name), buf);
   cases.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  assets.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const manifest = {
     version: 1,
     generator: 'scripts/golden.mjs',
@@ -223,11 +239,50 @@ export function flushAll() {
     dtype: 'f32le',
     toleranceClasses: TOL,
     caseCount: cases.length,
+    assets,
     cases,
   };
   const json = `${JSON.stringify(manifest, null, 2)}\n`;
   writeFileSync(join(OUT_DIR, 'manifest.json'), json);
-  return { caseCount: cases.length, fileCount: files.size + 1 };
+
+  // Tab-separated mirrors of the manifest, so parity.cpp needs no JSON parser.
+  // manifest.json stays the human- and tooling-facing artifact; these two are
+  // generated from the same objects, so they cannot drift out of step with it.
+  const idx = ['# id\tmodule\ttolClass\tmaxAbs\trms\tchannels\tframes\toutFile\tinFile\tinChannels\tinFrames\tasset'];
+  for (const c of cases) {
+    idx.push([
+      c.id, c.module, c.tolClass, c.tolerance.maxAbs, c.tolerance.rms,
+      c.channels, c.frames, c.output.file,
+      c.input ? c.input.file : '-', c.input ? c.input.channels : 0,
+      c.input ? c.input.frames : 0, c.asset ?? '-',
+    ].join('\t'));
+  }
+  writeFileSync(join(OUT_DIR, 'index.tsv'), `${idx.join('\n')}\n`);
+
+  const kv = ['# caseId\tkey\tvalue'];
+  for (const c of cases) {
+    for (const [k, v] of flatten(c.params)) kv.push(`${c.id}\t${k}\t${v}`);
+  }
+  writeFileSync(join(OUT_DIR, 'params.tsv'), `${kv.join('\n')}\n`);
+
+  return { caseCount: cases.length, fileCount: files.size + 3 };
+}
+
+/** Flatten a params record to (key, value) pairs. Arrays become comma lists,
+ *  nested objects become dotted keys. Values round-trip as JSON numbers. */
+function flatten(obj, prefix = '', out = []) {
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v)) out.push([key, v.map(String).join(',')]);
+    else if (typeof v === 'object') flatten(v, key, out);
+    else {
+      const s = String(v);
+      if (s.includes('\t') || s.includes('\n')) throw new Error(`param ${key} has a tab/newline`);
+      out.push([key, s]);
+    }
+  }
+  return out;
 }
 
 /** Apply descriptor defaults, then id-keyed overrides, to an EngineVoice/FxUnit. */

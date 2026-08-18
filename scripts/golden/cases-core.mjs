@@ -127,8 +127,9 @@ export function ladderCases(D) {
     for (let i = 0; i < N; i++) out[i] = f.process(input[i]);
     emit({
       id: 'ladder_hot_c1200_r0p85', module: 'ladder.ts', tol: 'coeff',
-      output: out, input, params: { cutoffHz: 1200, resonance: 0.85, inputGain: 6 },
-      notes: 'Input at +6 so saturate() is well past its linear region.',
+      output: out, input, params: { cutoffHz: 1200, resonance: 0.85 },
+      notes: 'The stored input file is ALREADY scaled to +/-6 so saturate() runs '
+        + 'well past its linear region. Feed the file straight into process().',
     });
   }
 }
@@ -156,14 +157,16 @@ export function filterCases(D) {
   {
     const f = new StateVariableFilter(SR);
     f.setMode('lp'); f.setCutoff(800); f.setResonance(1);
-    const input = burst(N, 256, 0xbeef);
+    const raw = burst(N, 256, 0xbeef);
+    const input = new Float32Array(N);
+    for (let i = 0; i < N; i++) input[i] = raw[i] * 4;
     const out = new Float32Array(N);
-    for (let i = 0; i < N; i++) out[i] = f.process(input[i] * 4);
+    for (let i = 0; i < N; i++) out[i] = f.process(input[i]);
     emit({
       id: 'filters_svf_selfosc_c800', module: 'filters.ts', tol: 'coeff',
-      output: out, input, params: { mode: 'lp', cutoffHz: 800, resonance: 1, inputGain: 4 },
-      notes: 'Input is the stored file TIMES 4. 256-sample noise burst then silence: '
-        + 'the tail is bounded by softLimit(s,3,6) on the integrator states.',
+      output: out, input, params: { mode: 'lp', cutoffHz: 800, resonance: 1 },
+      notes: '256-sample noise burst at +/-4 then silence; the tail is bounded by '
+        + 'softLimit(s,3,6) on the integrator states. Feed the file straight in.',
     });
   }
 

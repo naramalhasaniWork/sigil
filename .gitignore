@@ -11,3 +11,7 @@ out/
 
 # Scratch trees from adversarial review agents — never history.
 .review-mut/
+
+# C++ port build output. CMake emits compiler_depend.ts — a timestamp file, not
+# TypeScript — which tsc would otherwise try to compile.
+native/build/

@@ -31,6 +31,7 @@ import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
 import { SigilCard } from '@/ui/components/sigil-card';
+import { DelaySync } from '@/ui/components/delay-sync';
 import { ScopeSwitch } from '@/ui/components/scope-switch';
 import { TrackRail } from '@/ui/components/track-rail';
 import { LoopStrip } from '@/ui/components/loop-strip';
@@ -249,6 +250,13 @@ export default function Page(): JSX.Element {
         <div className="flex flex-col lg:flex-row gap-8">
           <div className="flex-1 min-w-0">
             <div className="label mb-3" style={{ color: colour }}>Chain</div>
+            <DelaySync
+              descriptor={inst.fxDescriptor}
+              values={inst.fxValues}
+              bpm={song.seq.bpm}
+              onChange={inst.setFxParam}
+              colour={colour}
+            />
             <ParamGroups
               descriptor={inst.fxDescriptor}
               values={inst.fxValues}
