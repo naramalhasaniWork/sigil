@@ -630,6 +630,28 @@ export default function Page(): JSX.Element {
                 onUndo={history.undo}
                 onRedo={history.redo}
               />
+
+              {/*
+                A visible way in to the shortcut list.
+
+                Both the palette and this panel were keyboard-only, which meant
+                the only way to discover a shortcut was to already know one. A
+                question mark next to undo costs 44px and removes that circle.
+              */}
+              <button
+                type="button"
+                aria-label="Keyboard shortcuts"
+                onClick={(): void => setHelpOpen(true)}
+                className="shrink-0 border-l-[3px] text-[13px] font-bold"
+                style={{
+                  minWidth: 44, minHeight: 44,
+                  borderColor: 'var(--ink)',
+                  color: 'var(--ink)',
+                  background: 'transparent',
+                }}
+              >
+                ?
+              </button>
             </div>
           </div>
 
