@@ -11,6 +11,8 @@ import { ToastHost } from '@/ui/components/toast';
 import { ExportTray } from '@/ui/components/export-tray';
 import { useDragExport } from '@/ui/use-drag-export';
 import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
+import { useChordInput } from '@/ui/use-chord-input';
+import { DEFAULT_PAD_CHORDS } from '@/dsp/midi-chords';
 import { MacroRow } from '@/ui/components/macro-row';
 import { XYPad } from '@/ui/components/xy-pad';
 import { ParamGroups } from '@/ui/components/param-groups';
@@ -52,16 +54,34 @@ export default function Page(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inst.lastWav]);
 
-  useComputerKeyboard({
+  /*
+   * Chords is an instrument-wide mode, not a pad-grid feature. The pad grid
+   * builds its own chords because it needs per-pad labels, so it stays on the
+   * raw handlers; every other surface routes through this layer.
+   */
+  const chordConfig = useMemo(() => ({
+    ...DEFAULT_PAD_CHORDS,
+    mode: scaleState.mode === 'chords' ? ('scale-degree' as const) : ('off' as const),
+    root: scaleState.root,
+    scale: scaleState.scale,
+  }), [scaleState.mode, scaleState.root, scaleState.scale]);
+
+  const chordInput = useChordInput({
+    config: chordConfig,
     onNoteOn: inst.noteOn,
     onNoteOff: inst.noteOff,
+  });
+
+  useComputerKeyboard({
+    onNoteOn: chordInput.noteOn,
+    onNoteOff: chordInput.noteOff,
     octave,
     enabled: inst.started,
   });
 
   const midi = useMidi({
-    onNoteOn: inst.noteOn,
-    onNoteOff: inst.noteOff,
+    onNoteOn: chordInput.noteOn,
+    onNoteOff: chordInput.noteOff,
     enabled: inst.started,
   });
 
@@ -223,7 +243,7 @@ export default function Page(): JSX.Element {
                   }),
                   kept: v.kept,
                 }))}
-                auditioningId={null}
+                auditioningId={inst.auditioningId}
                 colour={colour}
                 onAudition={inst.auditionVariation}
                 onToggleKeep={inst.toggleKeep}
@@ -310,8 +330,9 @@ export default function Page(): JSX.Element {
             held={inst.held}
             scaleRoot={scaleState.root}
             scale={scaleState.scale}
-            onNoteOn={inst.noteOn}
-            onNoteOff={inst.noteOff}
+            chords={scaleState.mode === 'chords'}
+            onNoteOn={chordInput.noteOn}
+            onNoteOff={chordInput.noteOff}
           />
         ) : (
           <PadGrid

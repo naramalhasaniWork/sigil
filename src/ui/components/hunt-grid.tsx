@@ -36,13 +36,35 @@ export function HuntGrid({
           return (
             <div
               key={v.id}
-              className="border-[3px] flex flex-col"
+              className="relative border-[3px] flex flex-col"
               style={{
-                borderColor: v.kept ? colour : 'var(--ink)',
+                borderColor: v.kept || live ? colour : 'var(--ink)',
+                borderWidth: v.kept ? 5 : 3,
                 background: '#0A0A0A',
-                boxShadow: live ? `4px 4px 0 0 ${colour}` : 'none',
+                boxShadow: live ? `5px 5px 0 0 ${colour}` : 'none',
               }}
             >
+              {/* Kept is a hard corner flag: at a glance you can count what is
+                  in the breeding pool without reading any button labels. */}
+              {v.kept && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 right-0"
+                  style={{
+                    width: 0, height: 0,
+                    borderTop: `18px solid ${colour}`,
+                    borderLeft: '18px solid transparent',
+                  }}
+                />
+              )}
+              {live && (
+                <span
+                  className="absolute top-1.5 left-2 text-[8px] font-bold uppercase tracking-[0.18em]"
+                  style={{ color: colour }}
+                >
+                  ▶ Sounding
+                </span>
+              )}
               <button
                 type="button"
                 aria-label={`Audition ${v.name}`}
@@ -79,7 +101,7 @@ export function HuntGrid({
                 }}
                 onClick={(): void => onToggleKeep(v.id)}
               >
-                {v.kept ? 'Kept' : 'Keep'}
+                {v.kept ? '✓ In pool' : 'Keep'}
               </button>
             </div>
           );
@@ -94,7 +116,9 @@ export function HuntGrid({
           disabled={keptCount < 1}
           onClick={onBreed}
         >
-          Breed {keptCount > 0 ? `(${keptCount})` : ''}
+          {keptCount === 0
+            ? 'Keep some first'
+            : keptCount === 1 ? 'Breed from 1' : `Breed from ${keptCount}`}
         </button>
         <button
           type="button"

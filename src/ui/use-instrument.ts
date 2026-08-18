@@ -31,6 +31,10 @@ export interface HuntVariation {
   id: string;
   name: string;
   patch: Patch;
+  /** FX and character values travel with the variation — a sound is the whole
+   *  chain, so mutating only the engine explored a fraction of the space. */
+  fx: Float32Array;
+  magic: Float32Array;
   kept: boolean;
 }
 
@@ -379,19 +383,29 @@ export function useInstrument() {
   // ---- Hunt -------------------------------------------------------------
   const seedRef = useRef(1);
   const [huntVariations, setHuntVariations] = useState<readonly HuntVariation[]>([]);
+  const [auditioningId, setAuditioningId] = useState<string | null>(null);
 
   const reroll = useCallback((): void => {
     if (!descriptor || !current) return;
     const rng = makeRng(seedRef.current++);
     const seed: Patch = { engineId, values: Float32Array.from(current) };
-    const next = makeVariations(seed, descriptor, 6, 0.45, rng).map((patch, i) => ({
+    // FX move less than the engine: a wild reverb or freeze setting swamps the
+    // sound being judged, so the tail stays recognisable while the voice roams.
+    const fxSeed: Patch = { engineId: 'fx', values: Float32Array.from(fxValues) };
+    const magicSeed: Patch = { engineId: 'magic', values: Float32Array.from(magicValues) };
+    const engines = makeVariations(seed, descriptor, 6, 0.45, rng);
+    const fxs = makeVariations(fxSeed, FX_DESCRIPTOR, 6, 0.22, rng);
+    const magics = makeVariations(magicSeed, FX_MAGIC_DESCRIPTOR, 6, 0.18, rng);
+    setHuntVariations(engines.map((patch, i) => ({
       id: `${seedRef.current}-${i}`,
       name: `Variation ${i + 1}`,
       patch,
+      fx: fxs[i]?.values ?? Float32Array.from(fxValues),
+      magic: magics[i]?.values ?? Float32Array.from(magicValues),
       kept: false,
-    }));
-    setHuntVariations(next);
-  }, [descriptor, current, engineId]);
+    })));
+    setAuditioningId(null);
+  }, [descriptor, current, engineId, fxValues, magicValues]);
 
   const breedKept = useCallback((): void => {
     if (!descriptor) return;
@@ -400,22 +414,40 @@ export function useInstrument() {
     const rng = makeRng(seedRef.current++);
     const next: HuntVariation[] = [];
     for (let i = 0; i < 6; i++) {
-      const a = kept[i % kept.length]?.patch;
-      const b = kept[(i + 1) % kept.length]?.patch ?? a;
-      if (!a || !b) continue;
+      const pa = kept[i % kept.length];
+      const pb = kept[(i + 1) % kept.length] ?? pa;
+      if (!pa || !pb) continue;
       next.push({
         id: `${seedRef.current}-b${i}`,
         name: `Child ${i + 1}`,
-        patch: breed(a, b, descriptor, rng),
+        patch: breed(pa.patch, pb.patch, descriptor, rng),
+        fx: breed({ engineId: 'fx', values: pa.fx },
+                  { engineId: 'fx', values: pb.fx }, FX_DESCRIPTOR, rng).values,
+        magic: breed({ engineId: 'magic', values: pa.magic },
+                     { engineId: 'magic', values: pb.magic }, FX_MAGIC_DESCRIPTOR, rng).values,
         kept: false,
       });
     }
     setHuntVariations(next);
+    setAuditioningId(null);
   }, [descriptor, huntVariations]);
 
   const auditionVariation = useCallback((id: string): void => {
     const found = huntVariations.find((v) => v.id === id);
-    if (found) loadValues(found.patch.values);
+    if (!found) return;
+    loadValues(found.patch.values);
+    setFxValues(Float32Array.from(found.fx));
+    setMagicValues(Float32Array.from(found.magic));
+    const host = hostRef.current;
+    if (host) {
+      for (let i = 0; i < found.fx.length; i++) {
+        host.setParam(addressOf('fx', i), found.fx[i] as number);
+      }
+      for (let i = 0; i < found.magic.length; i++) {
+        host.setParam(addressOf('magic', i), found.magic[i] as number);
+      }
+    }
+    setAuditioningId(id);
   }, [huntVariations, loadValues]);
 
   const toggleKeep = useCallback((id: string): void => {
@@ -434,7 +466,7 @@ export function useInstrument() {
     sampleName, loadSampleFile,
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
-    huntVariations, reroll, breedKept, auditionVariation, toggleKeep,
+    huntVariations, reroll, breedKept, auditionVariation, toggleKeep, auditioningId,
     macros, setMacro, macroNames,
     fxDescriptor: FX_DESCRIPTOR, fxValues, setFxParam,
     magicDescriptor: FX_MAGIC_DESCRIPTOR, magicValues, setMagicParam,

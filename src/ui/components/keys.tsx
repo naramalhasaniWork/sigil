@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, type JSX } from 'react';
-import { SCALES, noteName, type ScaleName } from '@/dsp/chords';
+import { SCALES, diatonicChord, noteName, type ScaleName } from '@/dsp/chords';
 
 interface KeysProps {
   octave: number;
@@ -11,6 +11,11 @@ interface KeysProps {
   scaleRoot?: number;
   /** The active scale. Omit both scale props and the keys render as before. */
   scale?: ScaleName;
+  /**
+   * Chords mode. The chord itself is built by the input layer above, not here —
+   * this only labels the keys so the mode is visible instead of a surprise.
+   */
+  chords?: boolean;
   onNoteOn: (midi: number) => void;
   onNoteOff: (midi: number) => void;
 }
@@ -19,7 +24,7 @@ const SEMITONES = 24;
 const BLACK = new Set([1, 3, 6, 8, 10]);
 
 export function Keys({
-  octave, held, scaleRoot, scale, onNoteOn, onNoteOff,
+  octave, held, scaleRoot, scale, chords = false, onNoteOn, onNoteOff,
 }: KeysProps): JSX.Element {
   const base = 12 * octave;
 
@@ -33,6 +38,23 @@ export function Keys({
     for (const step of SCALES[scale]) set.add((((scaleRoot + step) % 12) + 12) % 12);
     return set;
   }, [scale, scaleRoot]);
+
+  /**
+   * The chord each in-scale key will sound. Built from the same scale degree the
+   * input layer uses, so the label cannot disagree with what you hear.
+   */
+  const chordLabels = useMemo(() => {
+    if (!chords || scale === undefined || scaleRoot === undefined) return null;
+    const steps = SCALES[scale];
+    const map = new Map<number, string>();
+    for (let pc = 0; pc < 12; pc++) {
+      const offset = (((pc - scaleRoot) % 12) + 12) % 12;
+      const degree = steps.indexOf(offset);
+      if (degree === -1) continue;
+      map.set(pc, diatonicChord(scaleRoot + 48, scale, degree).label);
+    }
+    return map;
+  }, [chords, scale, scaleRoot]);
 
   return (
     <div
@@ -48,7 +70,11 @@ export function Keys({
           <button
             key={midi}
             type="button"
-            aria-label={`Note ${noteName(midi)}`}
+            aria-label={
+              chordLabels?.get(midi % 12) !== undefined
+                ? `Chord ${chordLabels.get(midi % 12)} on ${noteName(midi)}`
+                : `Note ${noteName(midi)}`
+            }
             aria-pressed={isHeld}
             className="relative h-24 border-r-[3px] touch-none"
             style={{
@@ -65,6 +91,15 @@ export function Keys({
                 className="pointer-events-none absolute top-1.5 left-1/2 -translate-x-1/2 w-[5px] h-[5px]"
                 style={{ background: isHeld ? 'var(--bg)' : 'var(--muted)' }}
               />
+            ) : null}
+            {chordLabels?.get(midi % 12) !== undefined ? (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-[9px] font-bold uppercase tracking-[0.04em] leading-tight"
+                style={{ color: isHeld ? 'var(--bg)' : 'var(--ink)' }}
+              >
+                {chordLabels.get(midi % 12)}
+              </span>
             ) : null}
             {isC ? (
               <span
