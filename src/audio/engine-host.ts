@@ -12,8 +12,38 @@ export interface CaptureResult {
   hitLimit: boolean;
 }
 
+/**
+ * How hard the audio thread is being pushed.
+ *
+ * `latencyHint` can only be set when an AudioContext is CONSTRUCTED, so
+ * changing this means tearing the graph down and building a new one — which is
+ * exactly what `dispose()` exists for. The values are the Web Audio categories
+ * rather than raw seconds because the browser knows the device better than a
+ * number picked here does; a fixed buffer that is right on one machine is a
+ * crackle or a lag on another.
+ */
+export type LatencyProfile = 'responsive' | 'balanced' | 'stable';
+
+const LATENCY_HINT: Readonly<Record<LatencyProfile, AudioContextLatencyCategory>> = {
+  responsive: 'interactive',
+  balanced: 'balanced',
+  stable: 'playback',
+};
+
+export interface LatencyReadout {
+  /** What the graph adds before the samples reach the device, in ms. */
+  readonly baseMs: number;
+  /** What the device adds after that, in ms. Zero where unreported. */
+  readonly outputMs: number;
+  /** The number to put in a DAW's track delay. */
+  readonly totalMs: number;
+  /** False when the browser does not report latency at all — do not show 0.0. */
+  readonly reported: boolean;
+}
+
 export class EngineHost {
   private ctx: AudioContext | null = null;
+  private profile: LatencyProfile = 'responsive';
   private node: AudioWorkletNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   /** Resolver for the in-flight capture, settled when the worklet posts back. */
@@ -36,6 +66,43 @@ export class EngineHost {
 
   get sampleRate(): number {
     return this.ctx?.sampleRate ?? 48000;
+  }
+
+  get latencyProfile(): LatencyProfile {
+    return this.profile;
+  }
+
+  /**
+   * Round-trip latency, for a DAW's track delay.
+   *
+   * `baseLatency` is what the graph adds; `outputLatency` is what the device
+   * adds after it. Both are optional in the spec and Firefox has historically
+   * reported neither, so `reported` exists to stop the UI showing a confident
+   * 0.0 ms that is really "no idea" — a wrong number here is worse than no
+   * number, because someone will type it into Live and trust it.
+   */
+  get latency(): LatencyReadout {
+    const ctx = this.ctx;
+    if (ctx === null) return { baseMs: 0, outputMs: 0, totalMs: 0, reported: false };
+    const base = typeof ctx.baseLatency === 'number' ? ctx.baseLatency : Number.NaN;
+    const out = typeof ctx.outputLatency === 'number' ? ctx.outputLatency : Number.NaN;
+    const reported = Number.isFinite(base) || Number.isFinite(out);
+    const baseMs = Number.isFinite(base) ? base * 1000 : 0;
+    const outputMs = Number.isFinite(out) ? out * 1000 : 0;
+    return { baseMs, outputMs, totalMs: baseMs + outputMs, reported };
+  }
+
+  /**
+   * Switch buffer profile. Rebuilds the graph, because latencyHint is fixed at
+   * construction. Audio stops for the moment it takes, which is why this is a
+   * setup-panel control and not something to reach for mid-take.
+   */
+  async setLatencyProfile(profile: LatencyProfile): Promise<void> {
+    if (profile === this.profile && this.ctx !== null) return;
+    const wasRunning = this.ctx !== null;
+    await this.dispose();
+    this.profile = profile;
+    if (wasRunning) await this.start(profile);
   }
 
   /**
@@ -80,12 +147,15 @@ export class EngineHost {
     if (ctx !== null && ctx.state !== 'closed') await ctx.close();
   }
 
-  async start(): Promise<void> {
+  async start(profile: LatencyProfile = this.profile): Promise<void> {
     if (this.ctx) {
+      // Already running. A profile change cannot be applied to a live context,
+      // so it is the caller's job to restart — see setLatencyProfile.
       await this.ctx.resume();
       return;
     }
-    const ctx = new AudioContext();
+    this.profile = profile;
+    const ctx = new AudioContext({ latencyHint: LATENCY_HINT[profile] });
     await ctx.audioWorklet.addModule('/worklet/sigil-processor.js');
 
     const node = new AudioWorkletNode(ctx, 'sigil-processor', {

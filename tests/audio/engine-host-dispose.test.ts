@@ -178,3 +178,38 @@ describe('EngineHost.dispose', () => {
     expect(host.running).toBe(true);
   });
 });
+
+/*
+ * Latency reporting and the buffer profile.
+ *
+ * The number this produces is meant to be typed into a DAW's track delay, so
+ * being confidently wrong is worse than admitting ignorance — baseLatency and
+ * outputLatency are both optional in the spec and some browsers report neither.
+ */
+describe('latency readout', () => {
+  it('says it has no number rather than claiming zero before start', () => {
+    const host = new EngineHost();
+    const l = host.latency;
+    expect(l.reported).toBe(false);
+    expect(l.totalMs).toBe(0);
+  });
+
+  it('defaults to the most responsive profile', () => {
+    expect(new EngineHost().latencyProfile).toBe('responsive');
+  });
+
+  /* latencyHint is fixed at construction, so a profile change while stopped
+   * must still be remembered for the next start rather than silently ignored. */
+  it('remembers a profile set while stopped', async () => {
+    const host = new EngineHost();
+    await host.setLatencyProfile('stable');
+    expect(host.latencyProfile).toBe('stable');
+  });
+
+  it('is safe to set the profile it already has', async () => {
+    const host = new EngineHost();
+    await host.setLatencyProfile('balanced');
+    await host.setLatencyProfile('balanced');
+    expect(host.latencyProfile).toBe('balanced');
+  });
+});
