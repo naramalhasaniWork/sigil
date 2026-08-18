@@ -26,11 +26,14 @@ export function EngineRail({ engines, activeId, onSelect }: EngineRailProps): JS
             type="button"
             aria-pressed={active}
             onClick={(): void => onSelect(e.id)}
-            className="flex items-center gap-2.5 px-3 py-2.5 border-b-[3px] text-left transition-none"
+            className="flex items-center gap-2.5 px-3 border-b-[3px] text-left transition-none"
             style={{
+              minHeight: '44px',
               borderColor: 'var(--ink)',
               background: active ? e.colour : 'transparent',
-              color: active ? 'var(--bg)' : 'var(--muted)',
+              // Inactive engine names are navigation, not decoration: --muted is 4.08:1
+              // on --panel and fails AA. The active row already reads by its fill.
+              color: active ? 'var(--bg)' : 'var(--ink)',
             }}
           >
             <EngineMark engineId={e.id} colour={active ? '#0E0E0E' : e.colour} size={20} />

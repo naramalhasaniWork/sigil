@@ -30,11 +30,17 @@ export function PresetPanel({
         key={p.id}
         type="button"
         aria-pressed={active}
-        className="text-left text-[11px] font-bold uppercase tracking-[0.06em] px-1.5 py-1 border-l-[3px]"
+        className="flex items-center text-left text-[11px] font-bold uppercase
+                   tracking-[0.06em] px-2 border-l-[3px]"
         style={{
+          // 25px rows could not be hit on a phone. Every preset is now a full
+          // 44pt target; the list scrolls, so the extra height costs nothing.
+          minHeight: '44px',
           borderColor: active ? colour : 'transparent',
           background: active ? colour : 'transparent',
-          color: active ? 'var(--bg)' : mine ? 'var(--ink)' : 'var(--muted)',
+          // Every preset name is read. --muted failed AA, so built-ins take --ink
+          // like the user's own; the left border is what separates the two.
+          color: active ? 'var(--bg)' : 'var(--ink)',
         }}
         onClick={(): void => (mine ? onLoadUser(p.id) : onLoad(p.id))}
       >
@@ -49,8 +55,8 @@ export function PresetPanel({
         <span className="label">Presets</span>
         <button
           type="button"
-          className="border-[2px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em]"
-          style={{ borderColor: colour, color: colour }}
+          className="border-[2px] px-3 text-[9px] font-bold uppercase tracking-[0.14em]"
+          style={{ minHeight: '44px', minWidth: '44px', borderColor: colour, color: colour }}
           onClick={(): void => {
             // Pre-filled with what the patch actually reads as, so naming a
             // sound is a confirmation rather than a blank page.

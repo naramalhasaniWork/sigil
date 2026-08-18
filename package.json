@@ -9,6 +9,9 @@
     "start": "next start",
     "build:worklet": "node scripts/build-worklet.mjs",
     "test": "NODE_OPTIONS=--expose-gc vitest run",
+    "goldens": "node scripts/golden.mjs",
+    "goldens:check": "node scripts/golden.mjs --check",
+    "parity": "cmake -S native -B native/build && cmake --build native/build -j8 && ./native/build/sigil_parity",
     "test:watch": "NODE_OPTIONS=--expose-gc vitest",
     "desktop": "node scripts/desktop.mjs"
   },

@@ -25,7 +25,12 @@ body {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--muted);
+  /* --muted (#7D786C) is 4.08:1 on --panel and FAILS WCAG AA. `.label` is the
+     app's 9px micro-label and it is read, not decorated — parameter names, form
+     labels, units, empty states. It takes --ink. --muted survives for what it is
+     actually safe at: borders, hairlines and decorative strokes, which only owe
+     3:1. */
+  color: var(--ink);
 }
 
 *:focus-visible {

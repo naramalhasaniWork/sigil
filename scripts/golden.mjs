@@ -29,6 +29,7 @@ import {
   analogCases, fmCases, physicalCases, granularCases, wavetableCases, samplerCases,
   sourceBufferCases,
 } from './golden/cases-voices.mjs';
+import { voiceManagerCases, sigilChainCases } from './golden/cases-manager.mjs';
 
 const EXPORTS = `
 export { Smoother } from '@/dsp/smoothing';
@@ -62,6 +63,8 @@ export { PhysicalEngine } from '@/dsp/physical-voice';
 export { GranularEngine } from '@/dsp/granular-voice';
 export { WavetableEngine } from '@/dsp/wavetable-voice';
 export { SamplerEngine, setActiveSample } from '@/dsp/sampler-voice';
+export { VoiceManager } from '@/dsp/voice-manager';
+export { TuningTable } from '@/dsp/tuning';
 `;
 
 async function generate() {
@@ -94,6 +97,10 @@ async function generate() {
   magicChainCases(D);
 
   sourceBufferCases(probes);
+  // Polyphony and the processor's signal flow, ahead of the voice cases only
+  // because they must not run after samplerCases mutates the global sample.
+  voiceManagerCases(D);
+  sigilChainCases(D);
   analogCases(D);
   fmCases(D);
   physicalCases(D);
@@ -113,8 +120,13 @@ function selfCheck() {
     execFileSync(process.execPath, [join(ROOT, 'scripts/golden.mjs')], {
       env: { ...process.env, SIGIL_GOLDEN_OUT: tmp }, stdio: 'inherit',
     });
-    const a = readdirSync(OUT_DIR).sort();
-    const b = readdirSync(tmp).sort();
+    // Only generated artefacts. README.md is hand-written and lives alongside
+    // them, so it is not part of the determinism comparison.
+    const generated = (dir) => readdirSync(dir)
+      .filter((f) => f.endsWith('.f32') || f.endsWith('.tsv') || f === 'manifest.json')
+      .sort();
+    const a = generated(OUT_DIR);
+    const b = generated(tmp);
     if (a.join('\n') !== b.join('\n')) {
       console.error('MISMATCH: file lists differ');
       return 1;

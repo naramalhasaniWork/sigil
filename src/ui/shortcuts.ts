@@ -42,33 +42,35 @@ export const SHORTCUT_GROUPS = ['Transport', 'Sound', 'Hunt', 'Kit', 'View', 'He
 
 export const SHORTCUTS: readonly Shortcut[] = [
   // ── Transport ────────────────────────────────────────────────────────────
-  { id: 'transport.power', keys: 'space', label: 'Power / suspend audio', group: 'Transport' },
+  // There is no suspend — the browser needs a gesture to open an audio device
+  // and nothing closes it again. Calling it "suspend" promised a second half
+  // that was never there.
+  { id: 'transport.power', keys: 'space', label: 'Power — start audio', group: 'Transport' },
   {
     id: 'transport.panic', keys: 'mod+period', label: 'Panic — all notes off',
     group: 'Transport',
   },
-  {
-    id: 'transport.record', keys: 'alt+r', label: 'Record on / off',
-    group: 'Transport', when: 'playing',
-  },
+  // No `when` on any of these. The play surface is in the footer of every tab,
+  // so there is no screen where recording, bouncing or changing octave is not
+  // the right thing to be able to do — and a key that silently does nothing on
+  // four tabs out of six is worse than no key.
+  { id: 'transport.record', keys: 'alt+r', label: 'Record on / off', group: 'Transport' },
   {
     id: 'transport.bounce', keys: 'alt+b', label: 'Bounce held chord to WAV',
-    group: 'Transport', when: 'playing',
+    group: 'Transport',
   },
-  {
-    id: 'transport.octaveDown', keys: 'bracketleft', label: 'Octave down',
-    group: 'Transport', when: 'playing',
-  },
-  {
-    id: 'transport.octaveUp', keys: 'bracketright', label: 'Octave up',
-    group: 'Transport', when: 'playing',
-  },
+  { id: 'transport.octaveDown', keys: 'bracketleft', label: 'Octave down', group: 'Transport' },
+  { id: 'transport.octaveUp', keys: 'bracketright', label: 'Octave up', group: 'Transport' },
 
   // ── Sound ────────────────────────────────────────────────────────────────
+  // One per engine in registry order. The rail has six; a list of four
+  // advertised two engines you could not reach from the keyboard.
   { id: 'sound.engine1', keys: 'alt+1', label: 'Engine 1 — Analog', group: 'Sound' },
   { id: 'sound.engine2', keys: 'alt+2', label: 'Engine 2 — FM', group: 'Sound' },
   { id: 'sound.engine3', keys: 'alt+3', label: 'Engine 3 — Physical', group: 'Sound' },
   { id: 'sound.engine4', keys: 'alt+4', label: 'Engine 4 — Granular', group: 'Sound' },
+  { id: 'sound.engine5', keys: 'alt+5', label: 'Engine 5 — Sampler', group: 'Sound' },
+  { id: 'sound.engine6', keys: 'alt+6', label: 'Engine 6 — Wavetable', group: 'Sound' },
   { id: 'sound.presetNext', keys: 'p', label: 'Next preset', group: 'Sound' },
   { id: 'sound.presetPrev', keys: 'shift+p', label: 'Previous preset', group: 'Sound' },
   { id: 'sound.random', keys: 'alt+n', label: 'New random patch', group: 'Sound' },
@@ -78,16 +80,10 @@ export const SHORTCUTS: readonly Shortcut[] = [
 
   // ── Hunt ─────────────────────────────────────────────────────────────────
   { id: 'hunt.toggle', keys: 'alt+h', label: 'Open / close Hunt', group: 'Hunt' },
-  {
-    id: 'hunt.reroll', keys: 'f', label: 'Re-roll six variations',
-    group: 'Hunt', when: 'hunting',
-  },
-  {
-    id: 'hunt.breed', keys: 'shift+f', label: 'Breed kept variations',
-    group: 'Hunt', when: 'hunting',
-  },
-  { id: 'hunt.tapeBack', keys: 'alt+comma', label: 'Tape — step back', group: 'Hunt' },
-  { id: 'hunt.tapeForward', keys: 'alt+period', label: 'Tape — step forward', group: 'Hunt' },
+  // Also no `when`: both open Hunt on their way, so pressing F from anywhere
+  // lands you in front of the six things it just made.
+  { id: 'hunt.reroll', keys: 'f', label: 'Re-roll six variations', group: 'Hunt' },
+  { id: 'hunt.breed', keys: 'shift+f', label: 'Breed kept variations', group: 'Hunt' },
 
   // ── Kit ──────────────────────────────────────────────────────────────────
   { id: 'kit.assign', keys: 'k', label: 'Assign patch to next free pad', group: 'Kit' },
@@ -96,7 +92,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   // ── View ─────────────────────────────────────────────────────────────────
   { id: 'view.palette', keys: 'mod+k', label: 'Command palette', group: 'View' },
   { id: 'view.deep', keys: 'a', label: 'Deep view — every parameter', group: 'View' },
-  { id: 'view.visuals', keys: 'o', label: 'Visuals — scope & spectrum', group: 'View' },
+  { id: 'view.sculpt', keys: 'o', label: 'Sculpt view — macros, scope & spectrum', group: 'View' },
   { id: 'view.layout', keys: 'l', label: 'Play surface — keys / pads', group: 'View' },
 
   // ── Help ─────────────────────────────────────────────────────────────────

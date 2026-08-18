@@ -56,11 +56,18 @@ export function Keys({
     return map;
   }, [chords, scale, scaleRoot]);
 
+  /*
+   * Two octaves shared equally across the width meant 15px keys on a phone —
+   * narrower than a fingertip, and the play surface is the whole point on a
+   * phone. Each key now claims 44px first and only shares the leftovers, so on
+   * a narrow screen the keyboard scrolls instead of shrinking past playable.
+   */
   return (
-    <div
-      className="grid border-t-4"
-      style={{ gridTemplateColumns: `repeat(${SEMITONES}, 1fr)`, borderColor: 'var(--ink)' }}
-    >
+    <div className="overflow-x-auto border-t-4" style={{ borderColor: 'var(--ink)' }}>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: `repeat(${SEMITONES}, minmax(44px, 1fr))` }}
+      >
       {Array.from({ length: SEMITONES }, (_, i) => base + i).map((midi) => {
         const isBlack = BLACK.has(midi % 12);
         const isHeld = held.has(midi);
@@ -113,6 +120,7 @@ export function Keys({
           </button>
         );
       })}
+      </div>
     </div>
   );
 }

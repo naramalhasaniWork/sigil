@@ -21,6 +21,7 @@ import {
 import { nameOf, sigilOf, uniqueName, type Sigil } from '@/dsp/signature';
 import { describeAcross } from '@/dsp/lineage';
 import { useHuntLore } from '@/ui/use-hunt-lore';
+import type { PatchSnapshot } from '@/ui/patch-snapshot';
 
 export type Layout = 'keys' | 'pads';
 
@@ -509,7 +510,20 @@ export function useInstrument() {
   // the macro position.
   const [macros, setMacros] = useState<[number, number, number, number]>([0.5, 0.5, 0.5, 0.5]);
 
-  useEffect(() => { setMacros([0.5, 0.5, 0.5, 0.5]); }, [engineId]);
+  /*
+   * Macros re-centre when you change engine — four dials that mean something
+   * different per engine cannot keep their old positions. Undo is the one
+   * exception: restoring a snapshot that came from another engine has to land
+   * on that snapshot's macro positions, not on the centre. It parks them here
+   * so this effect, which runs after the engine change, hands them over instead
+   * of overwriting them.
+   */
+  const pendingMacrosRef = useRef<readonly [number, number, number, number] | null>(null);
+  useEffect(() => {
+    const pending = pendingMacrosRef.current;
+    pendingMacrosRef.current = null;
+    setMacros(pending === null ? [0.5, 0.5, 0.5, 0.5] : [...pending]);
+  }, [engineId]);
 
   const setMacro = useCallback((index: 0 | 1 | 2 | 3, value: number): void => {
     setMacros((prev) => {
@@ -617,6 +631,37 @@ export function useInstrument() {
     lore.trail, loreReset, loreCommit, loreSeedFor, describeGeneration,
   ]);
 
+  /**
+   * Throw the dice on the sound you are holding — one big mutation, applied
+   * straight to the instrument rather than offered as six cards.
+   *
+   * Hunt is the deliberate version of this; sometimes you just want to be
+   * somewhere else. It is only a reasonable gesture because undo exists: with
+   * a way back, a wild patch is an experiment instead of a loss.
+   */
+  const randomise = useCallback((): void => {
+    if (!descriptor || !current) return;
+    const rng = makeRng(seedRef.current++);
+    const [engineNext] = makeVariations(
+      { engineId, values: Float32Array.from(current) }, descriptor, 1, 0.8, rng,
+    );
+    if (engineNext === undefined) return;
+    loadValues(engineNext.values);
+    // FX roam less than the voice, for the same reason they do in Hunt: a wild
+    // tail swamps the sound you are trying to judge.
+    const [fxNext] = makeVariations(
+      { engineId: 'fx', values: Float32Array.from(fxValues) }, FX_DESCRIPTOR, 1, 0.3, rng,
+    );
+    if (fxNext !== undefined) {
+      setFxValues(fxNext.values);
+      for (let i = 0; i < fxNext.values.length; i++) {
+        hostRef.current?.setParam(addressOf('fx', i), fxNext.values[i] as number);
+      }
+    }
+    setActivePresetId(null);
+    setStatus('Rolled a new patch');
+  }, [descriptor, current, engineId, fxValues, loadValues]);
+
   const breedKept = useCallback((): void => {
     if (!descriptor) return;
     const kept = huntVariations.filter((v) => v.kept);
@@ -717,6 +762,13 @@ export function useInstrument() {
    * worklet and nothing special is needed at power-on.
    */
   const restored = useRef(false);
+  /**
+   * True once the stored session has been put back. Undo watches it: without
+   * this, restoring last night's patch on page load looked exactly like an
+   * edit, and the first Cmd-Z of the day threw the session away and dropped
+   * you on engine defaults.
+   */
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (restored.current) return;
@@ -760,6 +812,8 @@ export function useInstrument() {
       if (notes.length > 0) setStatus(notes[0] ?? null);
     } catch {
       // A corrupt session must never stop the instrument from opening.
+    } finally {
+      setHydrated(true);
     }
   }, []);
 
@@ -873,8 +927,44 @@ export function useInstrument() {
     }
   }, []);
 
+  /**
+   * Put a whole sound back, in one gesture — the seam undo/redo needs.
+   *
+   * It cannot be selectEngine() + loadValues() + setFxParam()xN: those are four
+   * separate state updates whose intermediate frames are audible, and the macro
+   * re-centre effect would fire between them and wipe the restored positions.
+   * One call, so the sound moves once.
+   */
+  const restorePatch = useCallback((snap: PatchSnapshot): void => {
+    const target = ENGINES.find((e) => e.descriptor.id === snap.engineId);
+    if (!target) return;
+    const host = hostRef.current;
+
+    if (snap.engineId !== engineId) {
+      // Hand the macro-reset effect the positions to land on. See its comment.
+      pendingMacrosRef.current = snap.macros;
+      setEngineId(snap.engineId);
+      host?.setEngine(snap.engineId);
+    }
+
+    setValues((prev) => ({ ...prev, [snap.engineId]: Float32Array.from(snap.values) }));
+    host?.setAllParams(snap.values);
+
+    setFxValues(Float32Array.from(snap.fx));
+    for (let i = 0; i < snap.fx.length; i++) {
+      host?.setParam(addressOf('fx', i), snap.fx[i] as number);
+    }
+    setMagicValues(Float32Array.from(snap.magic));
+    for (let i = 0; i < snap.magic.length; i++) {
+      host?.setParam(addressOf('magic', i), snap.magic[i] as number);
+    }
+
+    setMacros([...snap.macros]);
+    setActivePresetId(snap.presetId);
+  }, [engineId]);
+
   return {
-    exportPatch, importPatch, applySound,
+    exportPatch, importPatch, applySound, restorePatch,
     host: hostRef.current,
     started, start,
     engine, descriptor, engineId, selectEngine,
@@ -887,12 +977,13 @@ export function useInstrument() {
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep, auditioningId,
+    randomise,
     sigil, trueName, suggestedName,
     trail: lore.trail, tasteLabels: lore.tasteLabels, forgetTaste,
     macros, setMacro, macroNames, setParamByAddress,
     fxDescriptor: FX_DESCRIPTOR, fxValues, setFxParam,
     magicDescriptor: FX_MAGIC_DESCRIPTOR, magicValues, setMagicParam,
-    status, setStatus,
+    status, setStatus, hydrated,
     engineTrim: ENGINE_TRIM[engineId] ?? 1,
   };
 }

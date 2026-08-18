@@ -21,8 +21,10 @@ export function Transport({
         type="button"
         aria-pressed={running}
         onClick={onPower}
-        className="hard border-[3px] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em]"
+        className="hard border-[3px] px-4 text-[10px] font-bold uppercase tracking-[0.16em]"
         style={{
+          minHeight: '44px',
+          minWidth: '44px',
           borderColor: 'var(--ink)',
           background: running ? 'transparent' : colour,
           color: running ? 'var(--ink)' : 'var(--bg)',
@@ -37,8 +39,10 @@ export function Transport({
         aria-label={recording ? 'Stop recording' : 'Start recording'}
         disabled={!running}
         onClick={onToggleRecord}
-        className="hard border-[3px] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
+        className="hard border-[3px] px-4 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
         style={{
+          minHeight: '44px',
+          minWidth: '44px',
           borderColor: 'var(--ink)',
           background: recording ? '#FF3B30' : 'transparent',
           color: recording ? 'var(--bg)' : 'var(--ink)',
@@ -51,8 +55,11 @@ export function Transport({
         type="button"
         disabled={!running || bouncing}
         onClick={onBounce}
-        className="hard border-[3px] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
-        style={{ borderColor: 'var(--ink)', background: 'var(--physical)', color: 'var(--bg)' }}
+        className="hard border-[3px] px-4 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
+        style={{
+          minHeight: '44px', minWidth: '44px',
+          borderColor: 'var(--ink)', background: 'var(--physical)', color: 'var(--bg)',
+        }}
       >
         {bouncing ? 'Bouncing…' : 'Bounce WAV'}
       </button>

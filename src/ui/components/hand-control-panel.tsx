@@ -144,7 +144,7 @@ export function HandControlPanel({ onHands, targets }: HandControlPanelProps): J
     >
       <div className="flex items-center justify-between gap-2">
         <span className="label">HAND</span>
-        <span className="label" style={{ color: active ? PHYSICAL : undefined }}>{status}</span>
+        <span className="label" style={{ color: active ? PHYSICAL : INK }}>{status}</span>
       </div>
 
       <div
@@ -173,7 +173,8 @@ export function HandControlPanel({ onHands, targets }: HandControlPanelProps): J
         type="button"
         disabled={!supported && !enabled}
         onClick={(): void => setEnabled((on) => !on)}
-        className="hard border-[3px] px-3 py-2 text-xs font-bold tracking-[0.18em] uppercase disabled:opacity-40"
+        className="hard border-[3px] px-3 min-h-11 min-w-11 text-xs font-bold tracking-[0.18em]
+                   uppercase disabled:opacity-40"
         style={{ borderColor: INK, background: enabled ? INK : GROUND, color: enabled ? GROUND : INK }}
       >
         {enabled ? 'Stop camera' : 'Start camera'}
@@ -196,7 +197,7 @@ export function HandControlPanel({ onHands, targets }: HandControlPanelProps): J
         <Bar label="SPREAD" target={targets?.spread} value={r?.spread ?? 0} colour={PHYSICAL} />
       </div>
 
-      <p className="text-[10px] leading-snug" style={{ color: '#7D786C' }}>
+      <p className="text-[10px] leading-snug" style={{ color: INK }}>
         Video is processed entirely on your device. Nothing is recorded and no frames are
         ever uploaded. Tracking lags by about a tenth of a second, so hand movement shapes
         the sound — it does not play the notes.

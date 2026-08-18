@@ -69,7 +69,7 @@ export function ParamRow({
           aria-valuemin={min}
           aria-valuemax={max}
           aria-valuenow={value}
-          className="flex-1 h-7 border-[3px] cursor-ew-resize touch-none relative"
+          className="flex-1 h-11 border-[3px] cursor-ew-resize touch-none relative"
           style={{ borderColor: 'var(--ink)', background: '#0A0A0A' }}
           onPointerDown={(e): void => {
             dragging.current = true;
@@ -101,7 +101,7 @@ export function ParamRow({
         {editing ? (
           <input
             autoFocus
-            className="w-20 shrink-0 border-[3px] bg-transparent px-1.5 py-0.5 text-xs font-bold"
+            className="w-20 h-11 shrink-0 border-[3px] bg-transparent px-1.5 text-xs font-bold"
             style={{ borderColor: colour, color: 'var(--ink)' }}
             value={draft}
             onChange={(e): void => setDraft(e.target.value)}
@@ -114,7 +114,7 @@ export function ParamRow({
         ) : (
           <button
             type="button"
-            className="w-20 shrink-0 text-right text-xs font-bold tabular-nums"
+            className="w-20 h-11 shrink-0 text-right text-xs font-bold tabular-nums"
             style={{ color: colour }}
             aria-label={`Edit ${name} value. Shift-click to reset to default.`}
             title="Click to type a value · Shift-click to reset to default"
@@ -136,8 +136,8 @@ export function ParamRow({
           type="button"
           aria-expanded={open}
           aria-label={`What does ${name} do?`}
-          className="w-6 h-6 shrink-0 border-[2px] text-[11px] font-bold"
-          style={{ borderColor: open ? colour : 'var(--muted)', color: open ? colour : 'var(--muted)' }}
+          className="w-11 h-11 shrink-0 border-[2px] text-[11px] font-bold"
+          style={{ borderColor: open ? colour : 'var(--muted)', color: open ? colour : 'var(--ink)' }}
           onClick={(): void => setOpen((v) => !v)}
         >
           ?

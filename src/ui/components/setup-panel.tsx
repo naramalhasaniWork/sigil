@@ -99,8 +99,10 @@ export function SetupPanel({
               type="button"
               aria-pressed={active}
               onClick={(): void => onSection(name)}
-              className="border-[3px] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
+              className="border-[3px] px-3 text-[9px] font-bold uppercase tracking-[0.16em]"
               style={{
+                minHeight: '44px',
+                minWidth: '44px',
                 borderColor: active ? colour : 'var(--muted)',
                 background: active ? colour : 'transparent',
                 color: active ? 'var(--bg)' : 'var(--ink)',

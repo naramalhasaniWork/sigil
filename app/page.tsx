@@ -40,8 +40,18 @@ import { NotePicker } from '@/ui/components/note-picker';
 import { SongPane } from '@/ui/components/song-pane';
 import type { TimelineHeight } from '@/ui/components/timeline';
 import { useSong } from '@/ui/use-song';
+import { useShortcuts } from '@/ui/use-shortcuts';
+import { shortcutHandlers, buildCommands, type SigilActions } from '@/ui/sigil-commands';
+import { ShortcutHelp } from '@/ui/components/shortcut-help';
+import { CommandPalette } from '@/ui/components/command-palette';
+import { usePatchHistory } from '@/ui/use-patch-history';
+import { HistoryButtons } from '@/ui/components/history-buttons';
+import type { PatchSnapshot } from '@/ui/patch-snapshot';
 
 type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export' | 'setup';
+
+/** Stand-in while an engine's values are still settling. Never played from. */
+const NO_VALUES = new Float32Array(0);
 
 export default function Page(): JSX.Element {
   const inst = useInstrument();
@@ -73,6 +83,10 @@ export default function Page(): JSX.Element {
   const [sideOpen, setSideOpen] = useState(false);
   /** The cell waiting for a note. Non-null means the picker is up. */
   const [pickerCell, setPickerCell] = useState<{ trackId: string; sectionId: string } | null>(null);
+
+  /** The two keyboard surfaces. Both are dialogs; only one is ever up. */
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const colour = inst.descriptor?.colour ?? '#FF6B6B';
   const tray = useDragExport();
@@ -189,6 +203,112 @@ export default function Page(): JSX.Element {
     inst.setMacro(1, x);
     inst.setMacro(0, y);
   }, [inst]);
+
+  /*
+   * The sound, as one value. Everything that can change a patch — knobs,
+   * macros, the XY pad, presets, Hunt, the randomiser, MIDI learn — ends up
+   * here, which is why undo watches this rather than wrapping twelve callers
+   * and forgetting the thirteenth.
+   */
+  const snapshot: PatchSnapshot = useMemo(() => ({
+    engineId: inst.engineId,
+    values: inst.values ?? NO_VALUES,
+    fx: inst.fxValues,
+    magic: inst.magicValues,
+    macros: inst.macros,
+    presetId: inst.activePresetId,
+  }), [
+    inst.engineId, inst.values, inst.fxValues,
+    inst.magicValues, inst.macros, inst.activePresetId,
+  ]);
+
+  const history = usePatchHistory(snapshot, inst.restorePatch);
+
+  /*
+   * Putting the stored session back is not an edit. Re-basing here is what
+   * stops the first undo of a session from discarding the sound you opened
+   * the app to keep working on.
+   */
+  const { clear: clearHistory } = history;
+  useEffect(() => {
+    if (inst.hydrated) clearHistory();
+  }, [inst.hydrated, clearHistory]);
+
+  const showTab = useCallback((v: View): void => {
+    setView(v);
+    // In SONG scope the tabs live in the side panel, so choosing one has to
+    // open it — otherwise the tab you asked for is selected out of sight.
+    if (songScope) setSideOpen(true);
+    if (v === 'hunt' && inst.huntVariations.length === 0) inst.reroll();
+  }, [songScope, inst]);
+
+  /** Built-ins then your own — the order the preset list already shows. */
+  const presetOrder = useMemo(
+    () => [
+      ...inst.presets.map((p) => ({ id: p.id, mine: false })),
+      ...inst.userPresets.map((u) => ({ id: u.id, mine: true })),
+    ],
+    [inst.presets, inst.userPresets],
+  );
+
+  const actions: SigilActions = {
+    power: (): void => { void inst.start(); },
+    panic: (): void => { song.panicAll(); secrets.panicPressed(); },
+    toggleRecord: (): void => { void inst.toggleRecord(); },
+    bounce: (): void => { void inst.bounceChord(); },
+    octave: (delta): void => setOctave((o) => Math.min(8, Math.max(0, o + delta))),
+    selectEngineAt: (index): void => {
+      const target = engineSummaries[index];
+      if (target === undefined) return;
+      if (songScope) song.selectEngine(target.id);
+      else inst.selectEngine(target.id);
+    },
+    stepPreset: (delta): void => {
+      const count = presetOrder.length;
+      if (count === 0) return;
+      const at = presetOrder.findIndex((p) => p.id === inst.activePresetId);
+      // Nothing loaded yet: forward lands on the first, back on the last.
+      const from = at === -1 ? (delta > 0 ? -1 : 0) : at;
+      const next = presetOrder[(((from + delta) % count) + count) % count];
+      if (next === undefined) return;
+      if (next.mine) inst.loadUserPreset(next.id);
+      else inst.loadPreset(next.id);
+    },
+    randomise: inst.randomise,
+    save: (): void => inst.savePreset(inst.suggestedName),
+    undo: history.undo,
+    redo: history.redo,
+    toggleHunt: (): void => showTab(view === 'hunt' ? 'sculpt' : 'hunt'),
+    reroll: (): void => { inst.reroll(); showTab('hunt'); },
+    breed: (): void => { inst.breedKept(); showTab('hunt'); },
+    assignPad: (): void => {
+      const free = kit.kit.slots.find((slot) => slot.wav === null);
+      if (free === undefined) {
+        inst.setStatus('Kit is full — clear a pad first.');
+        return;
+      }
+      void inst.renderCurrent().then((rendered) => {
+        if (rendered === null) return;
+        kit.assign(free.index, rendered.name, rendered.bytes, rendered.durationMs);
+        inst.setStatus(`Pad ${String(free.index + 1)} ← ${rendered.name}`);
+      });
+    },
+    exportKit: (): void => {
+      if (kit.filled === 0) {
+        inst.setStatus('Nothing on the pads yet — assign a sound first.');
+        return;
+      }
+      kit.exportZip();
+    },
+    togglePalette: (): void => setPaletteOpen((o) => !o),
+    showTab,
+    toggleLayout: (): void => inst.chooseLayout(inst.layout === 'keys' ? 'pads' : 'keys'),
+    toggleHelp: (): void => setHelpOpen((o) => !o),
+  };
+
+  const handlers = shortcutHandlers(actions);
+  useShortcuts(handlers);
+  const commands = buildCommands(handlers, actions);
 
   const heldPads = useMemo(() => new Set<number>(), []);
 
@@ -456,20 +576,20 @@ export default function Page(): JSX.Element {
         </aside>
 
         <section className="flex-1 min-w-0 flex flex-col">
-          <div className="flex overflow-x-auto border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
+          {/*
+            The tabs scroll; the controls to their right do not. The whole row
+            used to be one overflow-x-auto strip, so on a phone the scope switch
+            simply slid off the end and could not be reached — and undo has to
+            be reachable at every width or it is not a safety net.
+          */}
+          <div className="flex border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
+            <div className="flex-1 min-w-0 flex overflow-x-auto">
             {(['sculpt', 'deep', 'fx', 'hunt', 'export', 'setup'] as const).map((v) => (
               <Fragment key={v}>
                 <button
                   type="button"
                   aria-pressed={view === v}
-                  onClick={(): void => {
-                    setView(v);
-                    // In SONG scope the tabs live in the side panel, so tapping
-                    // one has to open it — otherwise the tab you asked for is
-                    // selected somewhere you cannot see.
-                    if (songScope) setSideOpen(true);
-                    if (v === 'hunt' && inst.huntVariations.length === 0) inst.reroll();
-                  }}
+                  onClick={(): void => showTab(v)}
                   className="shrink-0 px-4 text-[10px] font-bold uppercase tracking-[0.18em] border-r-[3px]"
                   style={{
                     minHeight: '44px',
@@ -484,18 +604,32 @@ export default function Page(): JSX.Element {
               </Fragment>
             ))}
 
-            {/*
-              Pushed to the far right, past every instrument tab.
+              {/*
+                Pushed past every instrument tab, and inside the scroller with
+                them. SIGIL is a sound-design instrument first; SONG is a second
+                mode still being worked out, and its position says which is
+                which — arranging is somewhere you go deliberately rather than
+                somewhere you land. ml-auto pins it right when there is room and
+                simply follows the tabs when there is not, which on a phone is
+                the difference between six tabs you can reach and two.
+              */}
+              <div className="ml-auto shrink-0 flex border-l-[3px]" style={{ borderColor: 'var(--ink)' }}>
+                <ScopeSwitch scope={song.arr.scope} onScope={song.arr.setScope} colour={colour} />
+              </div>
+            </div>
 
-              SIGIL is a sound-design instrument first; SONG is a second mode
-              still being worked out. Its position says which is which — the
-              tabs lead, and arranging is somewhere you go deliberately rather
-              than somewhere you land. ml-auto rather than a spacer so it stays
-              pinned right at any width, and the doubled border keeps it reading
-              as a different KIND of control rather than a seventh tab.
+            {/*
+              Undo is the one control here that never scrolls away. It is the
+              safety net for everything else on the page, and a safety net you
+              have to go looking for is not one.
             */}
-            <div className="ml-auto shrink-0 flex border-l-[3px]" style={{ borderColor: 'var(--ink)' }}>
-              <ScopeSwitch scope={song.arr.scope} onScope={song.arr.setScope} colour={colour} />
+            <div className="shrink-0 flex border-l-[3px]" style={{ borderColor: 'var(--ink)' }}>
+              <HistoryButtons
+                canUndo={history.canUndo}
+                canRedo={history.canRedo}
+                onUndo={history.undo}
+                onRedo={history.redo}
+              />
             </div>
           </div>
 
@@ -598,7 +732,11 @@ export default function Page(): JSX.Element {
       </div>
 
       <footer className="border-t-4" style={{ borderColor: 'var(--ink)' }}>
-        <div className="flex items-center justify-between px-3 py-1.5 border-b-[3px]" style={{ borderColor: '#2A2A28' }}>
+        <div
+          className="flex flex-wrap items-center justify-between gap-y-1.5 gap-x-3
+                     px-3 py-1.5 border-b-[3px]"
+          style={{ borderColor: '#2A2A28' }}
+        >
           <div className="flex gap-1.5">
             {(['keys', 'pads'] as const).map((l) => (
               <button
@@ -606,8 +744,10 @@ export default function Page(): JSX.Element {
                 type="button"
                 aria-pressed={inst.layout === l}
                 onClick={(): void => inst.chooseLayout(l)}
-                className="border-[2px] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
+                className="border-[2px] px-3 text-[9px] font-bold uppercase tracking-[0.16em]"
                 style={{
+                  minHeight: '44px',
+                  minWidth: '44px',
                   borderColor: inst.layout === l ? colour : 'var(--ink)',
                   color: inst.layout === l ? colour : 'var(--ink)',
                 }}
@@ -620,8 +760,11 @@ export default function Page(): JSX.Element {
               aria-expanded={keysOpen}
               aria-label={keysOpen ? 'Hide the keyboard' : 'Show the keyboard'}
               onClick={(): void => setKeysOpen((o) => !o)}
-              className="border-[2px] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
-              style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
+              className="border-[2px] px-3 text-[9px] font-bold uppercase tracking-[0.16em]"
+              style={{
+                minHeight: '44px', minWidth: '44px',
+                borderColor: 'var(--ink)', color: 'var(--ink)',
+              }}
             >
               {keysOpen ? 'hide ▾' : 'show ▸'}
             </button>
@@ -631,14 +774,14 @@ export default function Page(): JSX.Element {
             <button
               type="button"
               aria-label="Octave down"
-              className="hard border-[3px] w-9 h-8 text-sm font-bold leading-none"
+              className="hard border-[3px] w-11 h-11 text-sm font-bold leading-none"
               style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
               onClick={(): void => setOctave((o) => Math.max(0, o - 1))}
             >
               −
             </button>
             <span
-              className="border-[3px] px-2.5 h-8 flex items-center text-xs font-bold tabular-nums"
+              className="border-[3px] px-2.5 h-11 flex items-center text-xs font-bold tabular-nums"
               style={{ borderColor: colour, color: colour }}
             >
               C{octave}
@@ -646,7 +789,7 @@ export default function Page(): JSX.Element {
             <button
               type="button"
               aria-label="Octave up"
-              className="hard border-[3px] w-9 h-8 text-sm font-bold leading-none"
+              className="hard border-[3px] w-11 h-11 text-sm font-bold leading-none"
               style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
               onClick={(): void => setOctave((o) => Math.min(8, o + 1))}
             >
@@ -662,8 +805,10 @@ export default function Page(): JSX.Element {
                 : 'Panic — release all notes'
             }
             title="Releases every sounding note. Use it if a note hangs."
-            className="hard border-[3px] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
+            className="hard border-[3px] px-3 text-[9px] font-bold uppercase tracking-[0.16em]"
             style={{
+              minHeight: '44px',
+              minWidth: '44px',
               borderColor: 'var(--ink)',
               background: inst.held.size > 0 ? '#FF3B30' : 'transparent',
               color: inst.held.size > 0 ? 'var(--bg)' : 'var(--ink)',
@@ -683,6 +828,13 @@ export default function Page(): JSX.Element {
         )}
         {!songScope && playSurface}
       </footer>
+
+      <ShortcutHelp open={helpOpen} onClose={(): void => setHelpOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        onClose={(): void => setPaletteOpen(false)}
+      />
 
       <InstallPrompt colour={colour} />
       <ToastHost message={inst.status} colour={colour} />

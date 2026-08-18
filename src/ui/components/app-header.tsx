@@ -41,7 +41,8 @@ export function AppHeader({
         <button
           type="button"
           aria-label="SIGIL"
-          className="flex items-center bg-transparent border-0 p-0"
+          className="flex items-center justify-center bg-transparent border-0"
+          style={{ minHeight: '44px', minWidth: '44px' }}
           onDoubleClick={onMarkDoubleClick}
           {...holdProps}
         >
@@ -87,8 +88,11 @@ export function AppHeader({
         />
         <button
           type="button"
-          className="hard border-[3px] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em]"
-          style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
+          className="hard border-[3px] px-3 text-[10px] font-bold uppercase tracking-[0.16em]"
+          style={{
+            minHeight: '44px', minWidth: '44px',
+            borderColor: 'var(--ink)', color: 'var(--ink)',
+          }}
           onClick={(): void => fileRef.current?.click()}
         >
           Load Sample

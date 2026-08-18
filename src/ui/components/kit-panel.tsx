@@ -53,7 +53,7 @@ export function KitPanel({
           <input
             value={kit.kit.name}
             onChange={(e): void => kit.rename(e.target.value)}
-            className="border-[3px] bg-transparent px-2 py-1.5 text-sm font-bold"
+            className="border-[3px] bg-transparent px-2 h-11 text-sm font-bold"
             style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
           />
         </label>
@@ -72,7 +72,7 @@ export function KitPanel({
           type="button"
           disabled={kit.filled === 0}
           onClick={kit.exportZip}
-          className="hard border-[3px] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
+          className="hard border-[3px] px-4 min-h-11 min-w-11 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
           style={{ borderColor: 'var(--ink)', background: colour, color: 'var(--bg)' }}
         >
           Export kit .zip
@@ -82,7 +82,7 @@ export function KitPanel({
           type="button"
           disabled={kit.filled === 0}
           onClick={kit.clearAll}
-          className="border-[3px] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
+          className="border-[3px] px-3 min-h-11 min-w-11 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
           style={{ borderColor: 'var(--muted)', color: 'var(--ink)' }}
         >
           Clear all
@@ -101,7 +101,7 @@ export function KitPanel({
                   type="button"
                   aria-pressed={active}
                   onClick={(): void => onBounceMs(l.ms)}
-                  className="border-[3px] px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em]"
+                  className="border-[3px] px-2.5 min-h-11 min-w-11 text-[9px] font-bold uppercase tracking-[0.14em]"
                   style={{
                     borderColor: active ? colour : 'var(--muted)',
                     background: active ? colour : 'transparent',

@@ -111,7 +111,7 @@ export function InstallPrompt({ colour }: { colour: string }): JSX.Element | nul
           <button
             type="button"
             onClick={install}
-            className="border-[3px] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
+            className="border-[3px] px-3 min-h-11 min-w-11 text-[10px] font-bold uppercase tracking-[0.16em]"
             style={{ borderColor: 'var(--ink)', background: colour, color: 'var(--bg)' }}
           >
             Install
@@ -120,7 +120,7 @@ export function InstallPrompt({ colour }: { colour: string }): JSX.Element | nul
         <button
           type="button"
           onClick={hide}
-          className="border-[3px] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
+          className="border-[3px] px-3 min-h-11 min-w-11 text-[10px] font-bold uppercase tracking-[0.16em]"
           style={{ borderColor: 'var(--muted)', color: 'var(--ink)' }}
         >
           {showIosHelp ? 'Got it' : 'Not now'}

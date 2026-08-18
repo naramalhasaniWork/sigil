@@ -89,9 +89,11 @@ export function ParamGroups({
                     /* ml-auto keeps it on the far edge, so it can never be hit
                        while reaching for the group name. */
                     className="ml-auto border-[3px] px-2 text-[9px] font-bold uppercase tracking-[0.14em]"
-                    // 44px would tower over a group header; 28 with generous
-                    // horizontal padding stays reachable without dominating.
-                    style={{ height: 28, borderColor: 'var(--ink)', color: 'var(--ink)' }}
+                    // It used to be 28px on the argument that 44 would tower
+                    // over a group header. It towers over nothing — every other
+                    // control on the page is 44 now — and 28 was the one thing
+                    // in Deep you could still miss with a thumb.
+                    style={{ minHeight: 44, minWidth: 44, borderColor: 'var(--ink)', color: 'var(--ink)' }}
                     aria-label={`Reset ${group} to defaults`}
                     onClick={(): void => {
                       for (const i of changed) {

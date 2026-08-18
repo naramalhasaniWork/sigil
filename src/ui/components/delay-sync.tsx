@@ -135,11 +135,12 @@ export function DelaySync({ descriptor, values, bpm, onChange, colour }: {
                   aria-pressed={active}
                   onClick={(): void => setState((p) => ({ ...p, divisionId: d.id }))}
                   className="border-[3px] px-2 text-[10px] font-bold uppercase tracking-[0.1em]"
-                  // 36 rather than 44: fourteen of these in a row at 44 would
-                  // push the chain below the fold on a phone, and they are a
-                  // set of related choices rather than isolated targets.
+                  // 44, like everything else. These were held at 36 to keep the
+                  // chain above the fold on a phone — but "it saves scrolling"
+                  // is not a reason to ship a target a thumb misses, and they
+                  // wrap, so the cost is one more row.
                   style={{
-                    minHeight: 36, minWidth: 44,
+                    minHeight: 44, minWidth: 44,
                     borderColor: 'var(--ink)',
                     background: active ? colour : 'transparent',
                     color: active ? 'var(--bg)' : 'var(--ink)',

@@ -85,9 +85,12 @@ export function ShortcutHelp({
           <button
             type="button"
             onClick={onClose}
-            className="hard border-[3px] px-3 py-2 text-[10px] font-bold uppercase
+            className="hard border-[3px] px-3 text-[10px] font-bold uppercase
                        tracking-[0.16em]"
-            style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
+            style={{
+              minHeight: '44px', minWidth: '44px',
+              borderColor: 'var(--ink)', color: 'var(--ink)',
+            }}
           >
             Close
           </button>
