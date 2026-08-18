@@ -1,13 +1,16 @@
 'use client';
 
-import { useCallback, useMemo, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 import { ENGINES } from '@/dsp/registry';
 import { useInstrument } from '@/ui/use-instrument';
 import { useComputerKeyboard } from '@/ui/use-computer-keyboard';
 import { useMidi } from '@/ui/use-midi';
 import { EngineRail } from '@/ui/components/engine-rail';
-import { SigilWordmark } from '@/ui/components/engine-mark';
-import { Transport } from '@/ui/components/transport';
+import { AppHeader } from '@/ui/components/app-header';
+import { ToastHost } from '@/ui/components/toast';
+import { ExportTray } from '@/ui/components/export-tray';
+import { useDragExport } from '@/ui/use-drag-export';
+import { useEasterEggs, CreditsPanel } from '@/ui/components/easter-eggs';
 import { MacroRow } from '@/ui/components/macro-row';
 import { XYPad } from '@/ui/components/xy-pad';
 import { ParamGroups } from '@/ui/components/param-groups';
@@ -18,7 +21,7 @@ import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
 
-type View = 'sculpt' | 'deep' | 'fx' | 'hunt';
+type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export';
 
 export default function Page(): JSX.Element {
   const inst = useInstrument();
@@ -26,6 +29,26 @@ export default function Page(): JSX.Element {
   const [octave, setOctave] = useState(4);
 
   const colour = inst.descriptor?.colour ?? '#FF6B6B';
+  const tray = useDragExport();
+
+  const eggs = useEasterEggs({
+    onReveal: (_id, label): void => inst.setStatus(label),
+    held: inst.held,
+  });
+
+  // Every bounce lands in the tray, so a take is never one missed click from gone.
+  useEffect(() => {
+    if (!inst.lastWav) return;
+    tray.add({
+      name: inst.lastWav.name,
+      wav: inst.lastWav.bytes,
+      engineId: inst.engineId,
+      notes: [...inst.held],
+      durationMs: 2600,
+    });
+    // lastWav is the trigger; tray.add is stable and re-running on it would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inst.lastWav]);
 
   useComputerKeyboard({
     onNoteOn: inst.noteOn,
@@ -57,37 +80,21 @@ export default function Page(): JSX.Element {
   const heldPads = useMemo(() => new Set<number>(), []);
 
   return (
-    <main className="min-h-screen flex flex-col">
-      <header
-        className="flex items-center justify-between border-b-4 px-4 py-2.5 gap-3 flex-wrap"
-        style={{ borderColor: 'var(--ink)' }}
-      >
-        <div className="flex items-center gap-2.5">
-          <SigilWordmark size={21} />
-          <span className="label">{inst.descriptor?.name}</span>
-          {midi.supported && midi.deviceName && (
-            <span className="label" style={{ color: colour }}>MIDI · {midi.deviceName}</span>
-          )}
-          {inst.status && (
-            <span
-              className="text-[10px] font-bold uppercase tracking-[0.14em] border-[2px] px-2 py-1"
-              style={{ borderColor: colour, color: colour }}
-            >
-              {inst.status}
-            </span>
-          )}
-        </div>
-
-        <Transport
-          running={inst.started}
-          recording={inst.recording}
-          bouncing={inst.bouncing}
-          colour={colour}
-          onPower={(): void => { void inst.start(); }}
-          onToggleRecord={(): void => { void inst.toggleRecord(); }}
-          onBounce={(): void => { void inst.bounceChord(); }}
-        />
-      </header>
+    <main className={`min-h-screen flex flex-col ${eggs.ritualClass}`}>
+      <AppHeader
+        engineName={inst.descriptor?.name}
+        sampleName={inst.sampleName}
+        midiLabel={midi.supported ? midi.deviceName : null}
+        colour={colour}
+        running={inst.started}
+        recording={inst.recording}
+        bouncing={inst.bouncing}
+        holdProps={eggs.holdProps as unknown as Record<string, unknown>}
+        onPower={(): void => { void inst.start(); }}
+        onToggleRecord={(): void => { void inst.toggleRecord(); }}
+        onBounce={(): void => { void inst.bounceChord(); }}
+        onSampleFile={(f): void => { void inst.loadSampleFile(f); }}
+      />
 
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         <aside className="md:w-40 border-b-4 md:border-b-0 md:border-r-4" style={{ borderColor: 'var(--ink)' }}>
@@ -109,7 +116,7 @@ export default function Page(): JSX.Element {
 
         <section className="flex-1 min-w-0 flex flex-col">
           <div className="flex border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
-            {(['sculpt', 'deep', 'fx', 'hunt'] as const).map((v) => (
+            {(['sculpt', 'deep', 'fx', 'hunt', 'export'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -189,6 +196,17 @@ export default function Page(): JSX.Element {
                   />
                 </div>
               </div>
+            )}
+
+            {view === 'export' && (
+              <ExportTray
+                items={tray.items}
+                dragProps={tray.dragProps}
+                onDownload={tray.download}
+                onDownloadAll={tray.downloadAll}
+                onRemove={tray.remove}
+                accent={colour}
+              />
             )}
 
             {view === 'hunt' && (
@@ -288,6 +306,9 @@ export default function Page(): JSX.Element {
         )}
 
       </footer>
+
+      <ToastHost message={inst.status} colour={colour} />
+      <CreditsPanel open={eggs.credits} onClose={eggs.closeCredits} />
     </main>
   );
 }

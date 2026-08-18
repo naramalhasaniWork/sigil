@@ -7,6 +7,7 @@ import { bouncePatch } from '@/audio/bounce';
 import { FX_DESCRIPTOR } from '@/dsp/fx-descriptor';
 import { FX_MAGIC_DESCRIPTOR } from '@/dsp/fx-magic-descriptor';
 import { addressOf } from '@/audio/param-space';
+import { decodeAudioFile, toMono, normaliseSample, detectPitchHz } from '@/audio/sample-store';
 import { KO2_SAMPLE_RATE } from '@/audio/wav';
 import { ENGINES, DEFAULT_ENGINE_ID } from '@/dsp/registry';
 import { PRESETS, presetToValues } from '@/dsp/presets';
@@ -236,6 +237,40 @@ export function useInstrument() {
     }
   }, [values, engineId, held]);
 
+  // ---- Sample loading ---------------------------------------------------
+  const [sampleName, setSampleName] = useState<string | null>(null);
+
+  /**
+   * Decodes a file and hands the audio to the worklet. The worklet holds its own
+   * copy of every module, so the sample must cross by message — setting module
+   * state on this side would silently do nothing.
+   */
+  const loadSampleFile = useCallback(async (file: File): Promise<void> => {
+    const host = hostRef.current;
+    const ctx = host?.context;
+    if (!host || !ctx) {
+      setStatus('Hit Power first, then load a sample.');
+      return;
+    }
+    setStatus(`Decoding ${file.name}…`);
+    try {
+      const stored = await decodeAudioFile(file, ctx);
+      const mono = normaliseSample(toMono(stored), 0.95);
+      const pitch = detectPitchHz(mono, stored.sampleRate);
+      const rootHz = pitch ?? 261.6255653;
+      host.loadSample(mono, stored.sampleRate, rootHz);
+      setSampleName(stored.name);
+      selectEngine('sampler');
+      setStatus(
+        pitch === null
+          ? `Loaded ${stored.name} — unpitched, root set to C4`
+          : `Loaded ${stored.name} — root ${pitch.toFixed(1)}Hz`,
+      );
+    } catch (err) {
+      setStatus(err instanceof Error ? `Could not load: ${err.message}` : 'Could not load sample');
+    }
+  }, [selectEngine]);
+
   const presetsForEngine = useMemo(
     () => PRESETS.filter((p) => p.engineId === engineId),
     [engineId],
@@ -396,6 +431,7 @@ export function useInstrument() {
     held, noteOn, noteOff, panic,
     recording, toggleRecord,
     bouncing, bounceChord, lastWav,
+    sampleName, loadSampleFile,
     presets: presetsForEngine, loadPreset, activePresetId,
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep,

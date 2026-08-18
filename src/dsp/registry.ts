@@ -3,6 +3,7 @@ import { AnalogEngine } from './analog-voice';
 import { FmEngine } from './fm-voice';
 import { PhysicalEngine } from './physical-voice';
 import { GranularEngine } from './granular-voice';
+import { SamplerEngine } from './sampler-voice';
 
 /**
  * The engine registry. Adding a synthesis engine is one line here plus its
@@ -13,6 +14,7 @@ export const ENGINES: readonly EngineModule[] = [
   FmEngine,
   PhysicalEngine,
   GranularEngine,
+  SamplerEngine,
 ];
 
 export function engineById(id: string): EngineModule | undefined {

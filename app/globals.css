@@ -36,3 +36,13 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Ritual mode — the Konami reveal. Inverts the instrument's polarity without
+   touching layout, so nothing shifts and nothing becomes unreadable. */
+.sigil-ritual {
+  --bg: #12060A;
+  --panel: #1D0B12;
+  --ink: #FFE9D6;
+  --analog: #FF2D55;
+}
+.sigil-ritual body { background: var(--bg); }

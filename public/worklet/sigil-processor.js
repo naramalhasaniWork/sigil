@@ -2615,12 +2615,560 @@ var GranularEngine = {
   allocVoice: (sampleRate2) => new GranularVoice(sampleRate2)
 };
 
+// src/dsp/sampler-descriptor.ts
+var SAMPLER_DESCRIPTOR = {
+  id: "sampler",
+  name: "Sampler",
+  colour: "#7BC96F",
+  macroNames: ["Body", "Air", "Grit", "Motion"],
+  params: [
+    {
+      id: "sample-start",
+      name: "Start",
+      group: "Sample",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      macro: 0,
+      macroDepth: 0.6,
+      mutability: 0.9,
+      explain: "Where in the file playback begins. Moving it past the attack turns a plucked note into a sustained one, and moving it into the tail is how a recording of anything becomes a pad."
+    },
+    {
+      id: "sample-end",
+      name: "End",
+      group: "Sample",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 1,
+      curve: "linear",
+      mutability: 0.6,
+      explain: "Where playback stops. Pull it in to cut off a room tail, a breath, or the next hit in a recording that had two."
+    },
+    {
+      id: "loop-mode",
+      name: "Loop",
+      group: "Loop",
+      unit: "none",
+      min: 0,
+      max: 2,
+      default: 0,
+      curve: "stepped",
+      steps: 3,
+      mutability: 0.7,
+      explain: "Off plays the slice once and stops, which is what you want for drums. Forward repeats it so a note can be held forever. Ping-pong runs it back and forth, which never clicks at the turnaround and gives short slices a rocking motion."
+    },
+    {
+      id: "loop-start",
+      name: "Loop Start",
+      group: "Loop",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Where the repeating section begins, measured inside the trimmed slice. Playback runs from Start, reaches the end of the loop, and jumps back here."
+    },
+    {
+      id: "loop-length",
+      name: "Loop Length",
+      group: "Loop",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 1,
+      curve: "linear",
+      macro: 3,
+      macroDepth: 0.7,
+      mutability: 0.9,
+      explain: "How much material the loop covers. Long is a sustained tone; shorten it and the loop becomes a stutter, then a buzz whose pitch is the loop itself. This is the fastest route from a field recording to an instrument."
+    },
+    {
+      id: "loop-fade",
+      name: "Loop Fade",
+      group: "Loop",
+      unit: "ms",
+      min: 0,
+      max: 200,
+      default: 15,
+      curve: "linear",
+      mutability: 0.6,
+      explain: "Crossfades the end of the loop into its start so the two edges meet smoothly. Without it almost every loop ticks once per repeat, which is the single most obvious sign of a cheap sampler."
+    },
+    {
+      id: "reverse",
+      name: "Reverse",
+      group: "Sample",
+      unit: "none",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "stepped",
+      steps: 2,
+      mutability: 0.8,
+      explain: "Plays the slice backwards. Decays become swells, so any recording with a natural tail turns into something that breathes in rather than out."
+    },
+    {
+      id: "tune",
+      name: "Tune",
+      group: "Pitch",
+      unit: "semitones",
+      min: -24,
+      max: 24,
+      default: 0,
+      curve: "linear",
+      mutability: 0.4,
+      explain: "Shifts the whole sample in semitones. Use it when the detected root note is an octave out, or to drop a sound two octaves for weight it never had."
+    },
+    {
+      id: "fine",
+      name: "Fine",
+      group: "Pitch",
+      unit: "semitones",
+      min: -0.5,
+      max: 0.5,
+      default: 0,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "Fine tuning, up to half a semitone either way. Recordings are rarely at concert pitch, and being a few cents out against other instruments is what makes a track sound sour."
+    },
+    {
+      id: "filter-cutoff",
+      name: "Cutoff",
+      group: "Filter",
+      unit: "hz",
+      min: 20,
+      max: 18e3,
+      default: 18e3,
+      curve: "exp",
+      macro: 1,
+      macroDepth: 0.8,
+      mutability: 0.9,
+      explain: "The brightness control. Everything above this frequency is progressively removed, which both darkens the sound and hides the harshness that comes from pitching a sample a long way up."
+    },
+    {
+      id: "filter-resonance",
+      name: "Resonance",
+      group: "Filter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.1,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Emphasises frequencies right at the cutoff point. Raise it to give a dull recording a vocal, squelchy edge it did not have."
+    },
+    {
+      id: "filter-model",
+      name: "Filter Type",
+      group: "Filter",
+      unit: "none",
+      min: 0,
+      max: 2,
+      default: 0,
+      curve: "stepped",
+      steps: 3,
+      mutability: 0.6,
+      explain: "Which filter circuit does the work: ladder (fat and steep), state-variable (cleaner, keeps more air), diode (squelchy and lopsided). On a sampler this is most of the difference between sounding like the source and sounding like an instrument."
+    },
+    {
+      id: "amp-attack",
+      name: "Attack",
+      group: "Envelope",
+      unit: "ms",
+      min: 0.5,
+      max: 4e3,
+      default: 2,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the note takes to reach full volume. Keep it short to preserve the transient that tells the ear what the sound is; lengthen it to fade in and lose the attack entirely."
+    },
+    {
+      id: "amp-decay",
+      name: "Decay",
+      group: "Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 800,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How quickly the note falls from its peak to the sustain level. With sustain down this is what shortens a long sample into a hit."
+    },
+    {
+      id: "amp-sustain",
+      name: "Sustain",
+      group: "Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 1,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "The level the note holds at while a key is down. Full leaves the recording as it was; lower it and the sample ducks away under its own decay."
+    },
+    {
+      id: "amp-release",
+      name: "Release",
+      group: "Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 120,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the sound takes to fade once the key is let go. Too short and every note ends with a click; long releases let looped notes overlap into a wash."
+    },
+    {
+      id: "drive",
+      name: "Drive",
+      group: "Character",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.1,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.85,
+      mutability: 0.9,
+      explain: "Overdrives the sample into the filter, adding harmonics and grit. A little restores the density a quiet recording lacks; a lot makes it aggressive and compressed."
+    },
+    {
+      id: "crush",
+      name: "Bits",
+      group: "Character",
+      unit: "none",
+      min: 2,
+      max: 16,
+      default: 16,
+      curve: "stepped",
+      steps: 15,
+      mutability: 0.8,
+      explain: "Resolution of the playback, in bits. Sixteen is clean; drop towards two and the quiet parts break up into the gritty, gravelly noise of early samplers, which flatters drums and destroys pads."
+    },
+    {
+      id: "amp-velocity",
+      name: "Vel > Level",
+      group: "Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.6,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "How much playing harder increases volume. At zero every note lands at exactly the same level, which is right for a loop and wrong for anything played by hand."
+    },
+    {
+      id: "wobble",
+      name: "Wobble",
+      group: "Character",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.85,
+      explain: "Slow pitch wander, the sound of tape that has been round the block. A trace stops a looped sample sounding frozen; a lot is a warped cassette."
+    },
+    {
+      id: "wobble-rate",
+      name: "Wobble Rate",
+      group: "Character",
+      unit: "hz",
+      min: 0.05,
+      max: 12,
+      default: 5,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "Speed of that pitch wander. Below one per second it is tape wow; around five it is a singer\u2019s vibrato; faster than that it turns into a flutter that sounds broken, which is sometimes the point."
+    }
+  ]
+};
+
+// src/dsp/sampler-voice.ts
+var P_START = 0;
+var P_END = 1;
+var P_LOOP_MODE = 2;
+var P_LOOP_START = 3;
+var P_LOOP_LENGTH = 4;
+var P_XFADE = 5;
+var P_REVERSE2 = 6;
+var P_TUNE = 7;
+var P_FINE = 8;
+var P_CUTOFF2 = 9;
+var P_RES2 = 10;
+var P_MODEL2 = 11;
+var P_ATTACK3 = 12;
+var P_DECAY4 = 13;
+var P_SUSTAIN3 = 14;
+var P_RELEASE4 = 15;
+var P_DRIVE2 = 16;
+var P_BITS = 17;
+var P_VEL_AMP2 = 18;
+var P_WOBBLE = 19;
+var P_WOBBLE_RATE = 20;
+var TWO_PI5 = 6.283185307179586;
+var CONTROL_STEP2 = 16;
+var DEFAULT_SR = 48e3;
+var DEFAULT_ROOT = 261.6255653;
+var EDGE_FADE = 96;
+var INV_EDGE_FADE = 1 / EDGE_FADE;
+var MIN_LOOP = 32;
+var VOICE_GAIN2 = 0.85;
+var activeData = null;
+var activeSr = DEFAULT_SR;
+var activeRoot = DEFAULT_ROOT;
+function setActiveSample(data, sampleRate2, rootHz) {
+  if (data.length >= 16) activeData = data;
+  if (sampleRate2 > 1e3 && sampleRate2 < 768e3) activeSr = sampleRate2;
+  if (rootHz > 8 && rootHz < 12e3) activeRoot = rootHz;
+}
+function buildDefault() {
+  const len = DEFAULT_SR;
+  const buf = new Float32Array(len);
+  let peak = 1e-9;
+  for (let i = 0; i < len; i++) {
+    const t = i / DEFAULT_SR;
+    const w = DEFAULT_ROOT * TWO_PI5 * t;
+    let v = Math.sin(w) * Math.exp(-3.2 * t) + Math.sin(w * 2.01) * 0.42 * Math.exp(-5.5 * t) + Math.sin(w * 3.02) * 0.22 * Math.exp(-8 * t) + Math.sin(w * 5.4) * 0.11 * Math.exp(-15 * t);
+    v *= 1 - Math.exp(-t * 900);
+    buf[i] = v;
+    const a = v < 0 ? -v : v;
+    if (a > peak) peak = a;
+  }
+  const g = 0.9 / peak;
+  for (let i = 0; i < len; i++) buf[i] = buf[i] * g;
+  return buf;
+}
+function readLin(d, pos, len) {
+  let i0 = pos | 0;
+  if (i0 < 0) i0 = 0;
+  else if (i0 > len - 1) i0 = len - 1;
+  let i1 = i0 + 1;
+  if (i1 > len - 1) i1 = len - 1;
+  const a = d[i0], b = d[i1];
+  return a + (b - a) * (pos - i0);
+}
+function saturate4(x) {
+  const x2 = x * x;
+  return x * (27 + x2) / (27 + 9 * x2);
+}
+function clamp01(v) {
+  return v > 0 ? v < 1 ? v : 1 : 0;
+}
+var SamplerVoice = class {
+  params = new Float32Array(SAMPLER_DESCRIPTOR.params.length);
+  ladder;
+  svf;
+  diode;
+  activeFilter;
+  ampEnv;
+  invSr;
+  pos = 0;
+  dir = 1;
+  baseInc = 1;
+  inc = 1;
+  wobPhase = 0;
+  wobInc = 0;
+  ctrl = 0;
+  velocity = 1;
+  noteRatio = 1;
+  active = false;
+  ended = false;
+  restart = false;
+  constructor(sampleRate2) {
+    this.invSr = 1 / sampleRate2;
+    this.ladder = createFilter("ladder", sampleRate2);
+    this.svf = createFilter("svf", sampleRate2);
+    this.diode = createFilter("diode", sampleRate2);
+    this.activeFilter = this.ladder;
+    this.ampEnv = new Envelope(sampleRate2);
+    for (let i = 0; i < this.params.length; i++) {
+      this.params[i] = SAMPLER_DESCRIPTOR.params[i]?.default ?? 0;
+    }
+    if (!activeData) activeData = buildDefault();
+    this.applyEnvelope();
+  }
+  setParam(index, value) {
+    if (index < 0 || index >= this.params.length) return;
+    this.params[index] = value;
+    if (index >= P_ATTACK3 && index <= P_RELEASE4) this.applyEnvelope();
+  }
+  applyEnvelope() {
+    const p = this.params;
+    this.ampEnv.set(
+      p[P_ATTACK3],
+      p[P_DECAY4],
+      p[P_SUSTAIN3],
+      p[P_RELEASE4]
+    );
+  }
+  noteOn(freq, velocity, voiceIndex) {
+    const f = freq > 8 ? freq < 12e3 ? freq : 12e3 : 8;
+    this.noteRatio = f / activeRoot;
+    this.velocity = velocity > 0 ? velocity < 1 ? velocity : 1 : 0;
+    this.ladder.reset();
+    this.svf.reset();
+    this.diode.reset();
+    this.applyEnvelope();
+    this.ampEnv.trigger();
+    this.wobPhase = (voiceIndex * 0.317 % 1 + 1) % 1;
+    this.ctrl = 0;
+    this.ended = false;
+    this.restart = true;
+    this.active = true;
+  }
+  noteOff() {
+    this.ampEnv.release();
+  }
+  isFinished() {
+    return this.active && (this.ended || this.ampEnv.isFinished());
+  }
+  updateControl() {
+    const p = this.params;
+    const depth = clamp01(p[P_WOBBLE]);
+    let mul = 1;
+    if (depth > 0) {
+      let ph = this.wobPhase + this.wobInc;
+      if (ph >= 1) ph -= ph | 0;
+      this.wobPhase = ph;
+      mul = 1 + depth * 0.06 * Math.sin(ph * TWO_PI5);
+    }
+    let inc = this.baseInc * mul;
+    if (!(inc > 1e-4)) inc = 1e-4;
+    else if (inc > 64) inc = 64;
+    this.inc = inc;
+    let cut = p[P_CUTOFF2];
+    if (!(cut > 10)) cut = 10;
+    this.activeFilter.setCutoff(cut);
+  }
+  render(out, offset, count) {
+    if (!this.active || this.ended) return;
+    const data = activeData;
+    if (data === null) return;
+    const len = data.length;
+    if (len < 16) return;
+    const p = this.params;
+    let s0 = Math.floor(clamp01(p[P_START]) * len);
+    let s1 = Math.floor(clamp01(p[P_END]) * len);
+    if (s0 > len - 8) s0 = len - 8;
+    if (s1 < s0 + 4) s1 = s0 + 4;
+    let mode = Math.round(p[P_LOOP_MODE]);
+    if (!(mode > 0)) mode = 0;
+    else if (mode > 2) mode = 2;
+    const span = s1 - s0;
+    if (span < MIN_LOOP * 2) mode = 0;
+    let lStart = s0 + clamp01(p[P_LOOP_START]) * span;
+    let lLen = clamp01(p[P_LOOP_LENGTH]) * (s1 - lStart);
+    if (lLen < MIN_LOOP) lLen = MIN_LOOP;
+    let lEnd = lStart + lLen;
+    if (lEnd > s1) {
+      lEnd = s1;
+      lStart = lEnd - lLen;
+    }
+    if (lStart < s0) {
+      lStart = s0;
+      lLen = lEnd - lStart;
+    }
+    let xf = p[P_XFADE] * 1e-3 * activeSr;
+    if (!(xf > 0)) xf = 0;
+    const room = lStart - s0;
+    if (xf > room) xf = room;
+    if (xf > lLen * 0.5) xf = lLen * 0.5;
+    const fading = mode === 1 && xf >= 1;
+    const invXf = fading ? 1 / xf : 0;
+    const xfStart = lEnd - xf;
+    const rev = p[P_REVERSE2] >= 0.5;
+    if (this.restart) {
+      this.dir = rev ? -1 : 1;
+      this.pos = rev ? s1 - 1 : s0;
+      this.restart = false;
+    } else if (this.pos < s0) this.pos = s0;
+    else if (this.pos > s1) this.pos = s1 - 1;
+    const model = Math.round(p[P_MODEL2]);
+    const filter = model === 1 ? this.svf : model === 2 ? this.diode : this.ladder;
+    this.activeFilter = filter;
+    filter.setResonance(p[P_RES2]);
+    const semis = p[P_TUNE] + p[P_FINE];
+    let base = this.noteRatio * activeSr * this.invSr * Math.pow(2, semis / 12);
+    if (!(base > 0)) base = 1;
+    this.baseInc = base;
+    this.wobInc = p[P_WOBBLE_RATE] * this.invSr * CONTROL_STEP2;
+    const drive = 1 + p[P_DRIVE2] * 8, driveComp = 1 / Math.sqrt(drive);
+    let bits = Math.round(p[P_BITS]);
+    if (!(bits > 2)) bits = 2;
+    else if (bits > 16) bits = 16;
+    const q = bits < 16 ? Math.pow(2, bits - 1) : 0, invQ = q > 0 ? 1 / q : 0;
+    const velAmp = clamp01(p[P_VEL_AMP2]);
+    const gain = (1 - velAmp + velAmp * this.velocity * this.velocity) * VOICE_GAIN2;
+    let i = 0;
+    while (i < count) {
+      if (this.ctrl === 0) {
+        this.updateControl();
+        this.ctrl = CONTROL_STEP2;
+      }
+      const m = this.ctrl < count - i ? this.ctrl : count - i;
+      const step = this.inc;
+      let j = 0;
+      for (; j < m; j++) {
+        let pos = this.pos;
+        let s = readLin(data, pos, len);
+        if (fading && pos > xfStart) {
+          const t = (pos - xfStart) * invXf;
+          s += (readLin(data, pos - lLen, len) - s) * t;
+        } else if (mode === 0) {
+          let d = pos - s0;
+          const d2 = s1 - pos;
+          if (d2 < d) d = d2;
+          if (d < EDGE_FADE) s *= d * INV_EDGE_FADE;
+        }
+        if (q > 0) s = Math.round(s * q) * invQ;
+        s = saturate4(s * drive) * driveComp;
+        let y = filter.process(s) * this.ampEnv.next() * gain;
+        if (!(y > -4 && y < 4)) y = y > 0 ? 4 : y < 0 ? -4 : 0;
+        out[offset + i + j] = out[offset + i + j] + y;
+        pos += step * this.dir;
+        if (mode === 1) {
+          while (pos >= lEnd) pos -= lLen;
+          while (pos < lStart) pos += lLen;
+        } else if (mode === 2) {
+          if (pos >= lEnd) {
+            pos = lEnd + lEnd - pos;
+            this.dir = -1;
+          } else if (pos <= lStart) {
+            pos = lStart + lStart - pos;
+            this.dir = 1;
+          }
+          if (pos > lEnd) pos = lEnd;
+          else if (pos < lStart) pos = lStart;
+        } else if (pos >= s1 || pos < s0) {
+          this.pos = pos;
+          this.ended = true;
+          return;
+        }
+        this.pos = pos;
+      }
+      i += j;
+      this.ctrl -= j;
+    }
+  }
+};
+var SamplerEngine = {
+  descriptor: SAMPLER_DESCRIPTOR,
+  allocVoice: (sampleRate2) => new SamplerVoice(sampleRate2)
+};
+
 // src/dsp/registry.ts
 var ENGINES = [
   AnalogEngine,
   FmEngine,
   PhysicalEngine,
-  GranularEngine
+  GranularEngine,
+  SamplerEngine
 ];
 var DEFAULT_ENGINE_ID = "analog";
 
@@ -2892,7 +3440,7 @@ var FX_DESCRIPTOR = {
 
 // src/dsp/fx.ts
 var DENORMAL6 = 1e-20;
-var P_DRIVE2 = 0;
+var P_DRIVE3 = 0;
 var P_DRIVE_TONE = 1;
 var P_CRUSH_RATE = 2;
 var P_CRUSH_BITS = 3;
@@ -3154,7 +3702,7 @@ var FxChain = class {
   /** Descriptor units in, DSP units out. Runs per knob move, never per sample:
    *  every exp and pow in this effect lives here. */
   toDsp(i, v) {
-    if (i === P_DRIVE2) return v < 0 ? 0 : v > 1 ? 1 : v;
+    if (i === P_DRIVE3) return v < 0 ? 0 : v > 1 ? 1 : v;
     if (i === P_DRIVE_TONE) return (v * 2 - 1) * TILT_AMOUNT;
     if (i === P_CRUSH_RATE) return 1 / (1 + v * 63);
     if (i === P_CRUSH_BITS) return Math.pow(2, v - 1);
@@ -3197,7 +3745,7 @@ var FxChain = class {
       for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
       const dry = buffer[n];
       let x = dry;
-      const amt = v[P_DRIVE2];
+      const amt = v[P_DRIVE3];
       this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
       if (amt > 0) {
         const g = 1 + amt * DRIVE_MAX_G;
@@ -3223,11 +3771,11 @@ var FxChain = class {
 
 // src/dsp/fx-magic-descriptor.ts
 var DENORMAL7 = 1e-20;
-var TWO_PI5 = Math.PI * 2;
+var TWO_PI6 = Math.PI * 2;
 function flush2(x) {
   return x < DENORMAL7 && x > -DENORMAL7 ? 0 : x;
 }
-function saturate4(x) {
+function saturate5(x) {
   const x2 = x * x;
   return x * (27 + x2) / (27 + 9 * x2);
 }
@@ -3355,7 +3903,7 @@ var PitchShifter = class {
     else if (p >= w) p -= w;
     this.phase = p;
     const q = p < w * 0.5 ? p + w * 0.5 : p - w * 0.5;
-    const g = 0.5 - 0.5 * Math.cos(TWO_PI5 * p / w);
+    const g = 0.5 - 0.5 * Math.cos(TWO_PI6 * p / w);
     return g * this.line.read(p) + (1 - g) * this.line.read(q);
   }
 };
@@ -3712,18 +4260,18 @@ var Tape = class {
     this.lp = 0;
   }
   process(x, wear, wow, flutter) {
-    this.wowPh += TWO_PI5 * 0.73 / this.sr;
-    if (this.wowPh > TWO_PI5) this.wowPh -= TWO_PI5;
-    this.fl1 += TWO_PI5 * 7.3 / this.sr;
-    if (this.fl1 > TWO_PI5) this.fl1 -= TWO_PI5;
-    this.fl2 += TWO_PI5 * 11.9 / this.sr;
-    if (this.fl2 > TWO_PI5) this.fl2 -= TWO_PI5;
+    this.wowPh += TWO_PI6 * 0.73 / this.sr;
+    if (this.wowPh > TWO_PI6) this.wowPh -= TWO_PI6;
+    this.fl1 += TWO_PI6 * 7.3 / this.sr;
+    if (this.fl1 > TWO_PI6) this.fl1 -= TWO_PI6;
+    this.fl2 += TWO_PI6 * 11.9 / this.sr;
+    if (this.fl2 > TWO_PI6) this.fl2 -= TWO_PI6;
     const mod = this.sr * (wow * 28e-4 * Math.sin(this.wowPh) + flutter * 35e-5 * (Math.sin(this.fl1) * 0.7 + Math.sin(this.fl2) * 0.3));
     this.line.write(x);
     const d = this.line.read(this.base + mod);
-    const hot = saturate4(d * (1 + wear * 5)) / (1 + wear * 1.6);
+    const hot = saturate5(d * (1 + wear * 5)) / (1 + wear * 1.6);
     const y = d + (hot - d) * wear;
-    let c = TWO_PI5 * (18e3 - 15200 * wear) / this.sr;
+    let c = TWO_PI6 * (18e3 - 15200 * wear) / this.sr;
     if (c > 0.99) c = 0.99;
     this.lp = flush2(this.lp + c * (y - this.lp));
     return this.lp;
@@ -3745,9 +4293,9 @@ var FreqShifter = class {
   }
   process(x, hz, ring) {
     this.hil.process(x);
-    let ph = this.phase + TWO_PI5 * hz / this.sr;
-    if (ph > Math.PI) ph -= TWO_PI5;
-    else if (ph < -Math.PI) ph += TWO_PI5;
+    let ph = this.phase + TWO_PI6 * hz / this.sr;
+    if (ph > Math.PI) ph -= TWO_PI6;
+    else if (ph < -Math.PI) ph += TWO_PI6;
     this.phase = ph;
     const c = Math.cos(ph), s = Math.sin(ph);
     return blend(this.hil.i * c + this.hil.q * s, x * c, ring);
@@ -3830,7 +4378,7 @@ var Shimmer = class {
   process(x, delay, fb, ratio, damp) {
     const tail = this.line.read(delay);
     this.z = flush2(this.z + (1 - damp * 0.92) * (tail - this.z));
-    let w = this.d2.process(this.d1.process(x + saturate4(this.shifter.process(this.z, ratio) * fb)));
+    let w = this.d2.process(this.d1.process(x + saturate5(this.shifter.process(this.z, ratio) * fb)));
     if (w > 4) w = 4;
     else if (w < -4) w = -4;
     this.line.write(flush2(w));
@@ -4161,6 +4709,9 @@ var SigilProcessor = class extends AudioWorkletProcessor {
           break;
         case "allNotesOff":
           this.active.allNotesOff();
+          break;
+        case "loadSample":
+          setActiveSample(msg.data, msg.sampleRate, msg.rootHz);
           break;
       }
     };

@@ -4,6 +4,7 @@ import { forEachParam } from '@/audio/param-transport';
 import { sectionOf } from '@/audio/param-space';
 import { FxChain } from '@/dsp/fx';
 import { MagicChain } from '@/dsp/fx-magic';
+import { setActiveSample } from '@/dsp/sampler-voice';
 
 interface NoteOnMessage {
   type: 'noteOn';
@@ -31,13 +32,26 @@ interface TuningMessage {
 interface AllNotesOffMessage {
   type: 'allNotesOff';
 }
+/**
+ * Sample audio must cross the realm boundary explicitly. The worklet is bundled
+ * separately, so it holds its OWN copy of every module — calling setActiveSample
+ * on the main thread mutates a different instance entirely and the worklet never
+ * sees it. This message is the only way a sample reaches the sampler.
+ */
+interface LoadSampleMessage {
+  type: 'loadSample';
+  data: Float32Array;
+  sampleRate: number;
+  rootHz: number;
+}
 type InboundMessage =
   | NoteOnMessage
   | NoteOffMessage
   | ParamMessage
   | EngineMessage
   | TuningMessage
-  | AllNotesOffMessage;
+  | AllNotesOffMessage
+  | LoadSampleMessage;
 
 declare const sampleRate: number;
 declare abstract class AudioWorkletProcessor {
@@ -137,6 +151,9 @@ class SigilProcessor extends AudioWorkletProcessor {
           break;
         case 'allNotesOff':
           this.active.allNotesOff();
+          break;
+        case 'loadSample':
+          setActiveSample(msg.data, msg.sampleRate, msg.rootHz);
           break;
       }
     };

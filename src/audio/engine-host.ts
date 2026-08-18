@@ -12,6 +12,11 @@ export class EngineHost {
   private recordDest: MediaStreamAudioDestinationNode | null = null;
   private chunks: Blob[] = [];
 
+  /** Exposed so sample decoding can reuse the live context instead of opening another. */
+  get context(): AudioContext | null {
+    return this.ctx;
+  }
+
   get analyser(): AnalyserNode | null {
     return this.analyserNode;
   }
@@ -81,6 +86,18 @@ export class EngineHost {
   setParam(index: number, value: number): void {
     const data = packParams([[index, value]]);
     this.node?.port.postMessage({ type: 'params', data }, [data.buffer]);
+  }
+
+  /**
+   * Hands sample audio to the worklet. The buffer is transferred rather than
+   * copied, so `data` becomes unusable on this side afterwards — pass a copy if
+   * the caller still needs it.
+   */
+  loadSample(data: Float32Array, sampleRate: number, rootHz: number): void {
+    this.node?.port.postMessage(
+      { type: 'loadSample', data, sampleRate, rootHz },
+      [data.buffer],
+    );
   }
 
   /** Bulk update — used by presets and by Hunt, which change everything at once. */
