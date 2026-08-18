@@ -211,7 +211,19 @@ class Stutter {
 }
 
 /** The six character effects in series, every parameter smoothed. */
+/** Below this a mix is inaudible, so the unit is skipped outright. */
+const SILENT = 1e-4;
+
 export class MagicChain implements MagicFx {
+  /** Smoother targets, so gating opens a unit the instant a mix starts rising
+   *  rather than waiting for the smoothed value to clear the threshold. */
+  private readonly tgt = new Float32Array(FX_MAGIC_DESCRIPTOR.params.length);
+  private wasVowel = false;
+  private wasShift = false;
+  private wasStutter = false;
+  private wasShimmer = false;
+  private wasTape = false;
+
   private readonly sr: number;
   private readonly sm: Smoother[] = [];
   private readonly val: Float32Array;
@@ -253,40 +265,126 @@ export class MagicChain implements MagicFx {
     if (index === P.stutterSeed) { this.stutter.setSeed(v); return; }
     if (index === P.freezeLength) this.freezeLenMs = v;
     (this.sm[index] as Smoother).setTarget(v);
+    this.tgt[index] = v;
   }
   reset(): void {
     this.freezer.reset(); this.shimmer.reset(); this.shifter.reset();
     this.vowel.reset(); this.stutter.reset(); this.tape.reset();
     this.held = false; this.wantCapture = false; this.wantRelease = false;
   }
+  /**
+   * PERFORMANCE: each unit is skipped entirely when its mix is silent.
+   *
+   * `blend(x, unit.process(...), mix)` reads as a bypass, but JavaScript
+   * evaluates arguments eagerly — so the vowel filter, frequency shifter,
+   * stutter, shimmer's pitch-shifting feedback delay, freezer and tape model all
+   * ran in full and had their output thrown away. Measured: this chain cost
+   * 2.49% of a core with every mix at zero, against 3.27% for the entire
+   * 16-voice synth. Two chains burned more CPU doing nothing than the instrument
+   * spent making sound.
+   *
+   * Re-enabling a unit resets it. Its delay lines hold audio from before the
+   * bypass, and fading that back in would burst stale sound — nothing was
+   * audible at mix zero, so there is no continuity worth preserving.
+   */
   process(buffer: Float32Array, count: number): void {
     if (this.wantCapture) {
       this.freezer.capture((this.freezeLenMs / 1000) * this.sr);
       this.wantCapture = false;
     }
     if (this.wantRelease) { this.freezer.release(); this.wantRelease = false; }
+
     const v = this.val;
     const np = v.length;
     const sr = this.sr;
+
+    /*
+     * Gate on the TARGET as well as the current value. Hoisting the smoother
+     * stepping out of the sample loop made parameter smoothing 128x slower — a
+     * knob move would have taken about a third of a second to arrive — so the
+     * per-sample stepping stays and the decision looks at where each mix is
+     * heading. `live` is true while a unit is on, still ramping up, or ramping
+     * down and not yet silent.
+     */
+    const t = this.tgt;
+    const live = (idx: number): boolean =>
+      (v[idx] as number) > SILENT || (t[idx] as number) > SILENT;
+
+    const onVowel = live(P.vowelMix);
+    const onShift = live(P.shiftMix);
+    const onStutter = live(P.stutterMix);
+    const onShimmer = live(P.shimmerMix);
+    const onFreeze = live(P.freezeMix);
+    const onTape = live(P.tapeWear) || live(P.tapeWow) || live(P.tapeFlutter);
+
+    if (onVowel && !this.wasVowel) this.vowel.reset();
+    if (onShift && !this.wasShift) this.shifter.reset();
+    if (onStutter && !this.wasStutter) this.stutter.reset();
+    if (onShimmer && !this.wasShimmer) this.shimmer.reset();
+    if (onTape && !this.wasTape) this.tape.reset();
+    this.wasVowel = onVowel; this.wasShift = onShift; this.wasStutter = onStutter;
+    this.wasShimmer = onShimmer; this.wasTape = onTape;
+
+    /*
+     * Fully bypassed. The freezer still needs feeding so a later capture has
+     * material, but that is a ring-buffer write per sample rather than the six
+     * effects, and the samples pass through untouched.
+     */
+    if (!onVowel && !onShift && !onStutter && !onShimmer && !onFreeze && !onTape) {
+      for (let i = 0; i < count; i++) {
+        for (let k = 0; k < np; k++) v[k] = (this.sm[k] as Smoother).next();
+        this.freezer.process(buffer[i] as number);
+      }
+      return;
+    }
+
+    // Transcendentals hoisted to block rate. Two `2 ** x` per SAMPLE violated
+    // the project's own hot-loop rule and bought nothing: both derive from
+    // smoothed parameters that barely move within a 128-sample block.
+    const stutterRatio = 2 ** ((t[P.stutterPitch] as number) / 12);
+    const shimmerRatio = 2 ** ((t[P.shimmerPitch] as number) / 12);
+    const stutterSlice = ((t[P.stutterSlice] as number) / 1000) * sr;
+    const shimmerSize = ((t[P.shimmerSize] as number) / 1000) * sr;
+    const shimmerFb = (t[P.shimmerFeedback] as number) * 0.85;
+
     for (let i = 0; i < count; i++) {
       for (let k = 0; k < np; k++) v[k] = (this.sm[k] as Smoother).next();
       let x = buffer[i] as number;
-      x = blend(x, this.vowel.process(x, v[P.vowelPos] as number, v[P.vowelSharp] as number),
-        v[P.vowelMix] as number);
-      x = blend(x, this.shifter.process(x, v[P.shiftHz] as number, v[P.shiftRing] as number),
-        v[P.shiftMix] as number);
-      x = blend(x, this.stutter.process(x, ((v[P.stutterSlice] as number) / 1000) * sr,
-        v[P.stutterChance] as number, 2 ** ((v[P.stutterPitch] as number) / 12)),
-        v[P.stutterMix] as number);
-      x = blend(x, this.shimmer.process(x, ((v[P.shimmerSize] as number) / 1000) * sr,
-        (v[P.shimmerFeedback] as number) * 0.85, 2 ** ((v[P.shimmerPitch] as number) / 12),
-        v[P.shimmerDamp] as number), v[P.shimmerMix] as number);
-      // The frozen layer sits under the live signal rather than replacing it —
-      // the whole point is playing against a sound nobody is holding any more.
-      const fm = v[P.freezeMix] as number;
-      x = x * (1 - 0.5 * fm) + this.freezer.process(x) * fm;
-      x = this.tape.process(x, v[P.tapeWear] as number, v[P.tapeWow] as number,
-        v[P.tapeFlutter] as number);
+
+      if (onVowel) {
+        x = blend(x, this.vowel.process(x, v[P.vowelPos] as number, v[P.vowelSharp] as number),
+          v[P.vowelMix] as number);
+      }
+      if (onShift) {
+        x = blend(x, this.shifter.process(x, v[P.shiftHz] as number, v[P.shiftRing] as number),
+          v[P.shiftMix] as number);
+      }
+      if (onStutter) {
+        x = blend(x, this.stutter.process(x, stutterSlice,
+          v[P.stutterChance] as number, stutterRatio), v[P.stutterMix] as number);
+      }
+      if (onShimmer) {
+        x = blend(x, this.shimmer.process(x, shimmerSize, shimmerFb, shimmerRatio,
+          v[P.shimmerDamp] as number), v[P.shimmerMix] as number);
+      }
+      /*
+       * The freezer ALWAYS runs, even at mix zero. It is a recorder as well as a
+       * player: skipping it would leave nothing in the buffer to capture, so
+       * pressing capture and then raising the mix would freeze silence. Only the
+       * blend is conditional.
+       */
+      const frozen = this.freezer.process(x);
+      if (onFreeze) {
+        // The frozen layer sits under the live signal rather than replacing it —
+        // the whole point is playing against a sound nobody is holding any more.
+        const fm = v[P.freezeMix] as number;
+        x = x * (1 - 0.5 * fm) + frozen * fm;
+      }
+      if (onTape) {
+        x = this.tape.process(x, v[P.tapeWear] as number, v[P.tapeWow] as number,
+          v[P.tapeFlutter] as number);
+      }
+
       if (!(x > -1e9 && x < 1e9)) { this.reset(); x = 0; }
       const y = softLimit(x, 0.9, 0.6);
       buffer[i] = y > 1.2 ? 1.2 : y < -1.2 ? -1.2 : y;

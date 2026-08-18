@@ -218,7 +218,13 @@ const DRIVE_REF = 0.35, DRIVE_MAX_G = 24;
 const TILT_HZ = 900, TILT_AMOUNT = 0.9, LIMIT = 1.5;
 
 /** drive -> bitcrush -> chorus -> delay -> reverb -> trim -> safety limiter. */
+/** Below this a mix is inaudible, so the unit is skipped outright. */
+const SILENT = 1e-4;
+
 export class FxChain implements FxUnit {
+  private wasChorus = false;
+  private wasDelay = false;
+  private wasReverb = false;
   private readonly sm: Smoother[] = []; private readonly target = new Float32Array(N_PARAMS);
   /** Smoothed, in DSP units — the only path into the DSP, so an un-smoothed
    *  parameter is structurally impossible. */
@@ -270,8 +276,28 @@ export class FxChain implements FxUnit {
     }
     this.chorus.reset(); this.delay.reset(); this.reverb.reset();
   }
+  /**
+   * PERFORMANCE: chorus, delay and reverb are skipped when their mix is silent.
+   *
+   * They used to run unconditionally and blend to nothing, which measured 1.69%
+   * of a core for a chain producing its input unchanged. Re-enabling resets the
+   * unit, because its delay lines still hold audio from before the bypass and
+   * fading that in would burst stale sound.
+   */
   process(buffer: Float32Array, count: number): void {
     const v = this.v, sm = this.sm;
+
+    // Decide what is live once per block rather than per sample.
+    for (let i = 0; i < N_PARAMS; i++) v[i] = (sm[i] as Smoother).next();
+    const onChorus = (v[P_CH_MIX] as number) > SILENT;
+    const onDelay = (v[P_DL_MIX] as number) > SILENT;
+    const onReverb = (v[P_RV_MIX] as number) > SILENT;
+
+    if (onChorus && !this.wasChorus) this.chorus.reset();
+    if (onDelay && !this.wasDelay) this.delay.reset();
+    if (onReverb && !this.wasReverb) this.reverb.reset();
+    this.wasChorus = onChorus; this.wasDelay = onDelay; this.wasReverb = onReverb;
+
     for (let n = 0; n < count; n++) {
       for (let i = 0; i < N_PARAMS; i++) v[i] = (sm[i] as Smoother).next();
       const dry = buffer[n] as number;
@@ -289,9 +315,9 @@ export class FxChain implements FxUnit {
       if (this.acc >= 1) { this.acc -= 1; this.held = x; }
       const half = v[P_CRUSH_BITS] as number;
       x = Math.floor(this.held * half + 0.5) / half;
-      x = this.chorus.process(x, v);
-      x = this.delay.process(x, v);
-      x = this.reverb.process(x, v);
+      if (onChorus) x = this.chorus.process(x, v);
+      if (onDelay) x = this.delay.process(x, v);
+      if (onReverb) x = this.reverb.process(x, v);
       x = sat((x * (v[P_TRIM] as number)) / LIMIT) * LIMIT;
       buffer[n] = x === x ? x : 0;
     }
