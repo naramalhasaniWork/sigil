@@ -145,3 +145,47 @@ describe('registry honesty', () => {
     }
   });
 });
+
+/*
+ * SIGIL is an instrument: letters get pressed constantly — to play notes, to
+ * name a patch, or by a hand resting on the keyboard. A bare `f` re-rolled Hunt
+ * and yanked you onto another tab mid-sound-design.
+ *
+ * Choosing letters outside the note map is not a fix; the next play surface or
+ * text field collides again. The rule is the guard: unmodified keys belong to
+ * the instrument, modified keys belong to the application.
+ */
+describe('no shortcut is a bare letter', () => {
+  /*
+   * Space is universal for play and the brackets are the octave steppers every
+   * tracker has used for decades — transport, not text.
+   *
+   * `shift+slash` is `?`, punctuation rather than a letter, and the near
+   * universal binding for help. It is safe for a second reason worth stating:
+   * use-shortcuts.ts guards on isTypingTarget, so nothing fires while a text
+   * field has focus. That guard is what makes any of this tolerable.
+   */
+  const ALLOWED_BARE = new Set(['space', 'bracketleft', 'bracketright', 'shift+slash']);
+
+  it('gives every letter shortcut a modifier', () => {
+    const offenders = SHORTCUTS
+      .filter((s) => !ALLOWED_BARE.has(s.keys))
+      .filter((s) => !/(^|\+)(mod|alt|ctrl|meta)\+/.test(s.keys))
+      .map((s) => `${s.id} (${s.keys})`);
+    expect(offenders).toEqual([]);
+  });
+
+  /*
+   * shift alone is NOT enough. Shift+letter is how you type a capital, so a
+   * shift-only binding fires while naming a patch.
+   */
+  it('does not count shift on its own as a modifier for a letter', () => {
+    const shiftOnly = SHORTCUTS
+      .filter((s) => s.keys.startsWith('shift+'))
+      .filter((s) => !ALLOWED_BARE.has(s.keys))
+      // shift+letter is how a capital is typed, so it is not a modifier here.
+      .filter((s) => /^shift\+[a-z]$/.test(s.keys))
+      .map((s) => `${s.id} (${s.keys})`);
+    expect(shiftOnly).toEqual([]);
+  });
+});

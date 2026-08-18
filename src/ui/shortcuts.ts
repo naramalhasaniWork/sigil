@@ -45,6 +45,19 @@ export const SHORTCUTS: readonly Shortcut[] = [
   // There is no suspend — the browser needs a gesture to open an audio device
   // and nothing closes it again. Calling it "suspend" promised a second half
   // that was never there.
+/*
+ * EVERY shortcut carries a modifier. None is a bare letter.
+ *
+ * This is an instrument: letters get pressed constantly, to play notes, to name
+ * a patch, or by accident with a hand resting on the keyboard. A bare `f` that
+ * re-rolled Hunt yanked you onto another tab mid-sound-design, and no amount of
+ * choosing letters outside the note map fixes that — the next person to add a
+ * play surface, or a text field, collides again.
+ *
+ * The rule is the guard: unmodified keys belong to the instrument, modified
+ * keys belong to the application. Space and the bracket keys are the deliberate
+ * exceptions, being transport rather than text.
+ */
   { id: 'transport.power', keys: 'space', label: 'Power — start audio', group: 'Transport' },
   {
     id: 'transport.panic', keys: 'mod+period', label: 'Panic — all notes off',
@@ -71,8 +84,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'sound.engine4', keys: 'alt+4', label: 'Engine 4 — Granular', group: 'Sound' },
   { id: 'sound.engine5', keys: 'alt+5', label: 'Engine 5 — Sampler', group: 'Sound' },
   { id: 'sound.engine6', keys: 'alt+6', label: 'Engine 6 — Wavetable', group: 'Sound' },
-  { id: 'sound.presetNext', keys: 'p', label: 'Next preset', group: 'Sound' },
-  { id: 'sound.presetPrev', keys: 'shift+p', label: 'Previous preset', group: 'Sound' },
+  { id: 'sound.presetNext', keys: 'alt+p', label: 'Next preset', group: 'Sound' },
+  { id: 'sound.presetPrev', keys: 'alt+shift+p', label: 'Previous preset', group: 'Sound' },
   { id: 'sound.random', keys: 'alt+n', label: 'New random patch', group: 'Sound' },
   { id: 'sound.save', keys: 'mod+s', label: 'Save patch', group: 'Sound' },
   { id: 'sound.undo', keys: 'mod+z', label: 'Undo', group: 'Sound' },
@@ -82,18 +95,18 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'hunt.toggle', keys: 'alt+h', label: 'Open / close Hunt', group: 'Hunt' },
   // Also no `when`: both open Hunt on their way, so pressing F from anywhere
   // lands you in front of the six things it just made.
-  { id: 'hunt.reroll', keys: 'f', label: 'Re-roll six variations', group: 'Hunt' },
-  { id: 'hunt.breed', keys: 'shift+f', label: 'Breed kept variations', group: 'Hunt' },
+  { id: 'hunt.reroll', keys: 'alt+f', label: 'Re-roll six variations', group: 'Hunt' },
+  { id: 'hunt.breed', keys: 'alt+shift+f', label: 'Breed kept variations', group: 'Hunt' },
 
   // ── Kit ──────────────────────────────────────────────────────────────────
-  { id: 'kit.assign', keys: 'k', label: 'Assign patch to next free pad', group: 'Kit' },
-  { id: 'kit.export', keys: 'shift+k', label: 'Export kit as .zip', group: 'Kit' },
+  { id: 'kit.assign', keys: 'alt+k', label: 'Assign patch to next free pad', group: 'Kit' },
+  { id: 'kit.export', keys: 'alt+shift+k', label: 'Export kit as .zip', group: 'Kit' },
 
   // ── View ─────────────────────────────────────────────────────────────────
   { id: 'view.palette', keys: 'mod+k', label: 'Command palette', group: 'View' },
-  { id: 'view.deep', keys: 'a', label: 'Deep view — every parameter', group: 'View' },
-  { id: 'view.sculpt', keys: 'o', label: 'Sculpt view — macros, scope & spectrum', group: 'View' },
-  { id: 'view.layout', keys: 'l', label: 'Play surface — keys / pads', group: 'View' },
+  { id: 'view.deep', keys: 'alt+a', label: 'Deep view — every parameter', group: 'View' },
+  { id: 'view.sculpt', keys: 'alt+o', label: 'Sculpt view — macros, scope & spectrum', group: 'View' },
+  { id: 'view.layout', keys: 'alt+l', label: 'Play surface — keys / pads', group: 'View' },
 
   // ── Help ─────────────────────────────────────────────────────────────────
   { id: 'help.shortcuts', keys: 'shift+slash', label: 'Keyboard shortcuts', group: 'Help' },
