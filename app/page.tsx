@@ -279,6 +279,7 @@ export default function Page(): JSX.Element {
       >
         <SetupPanel
           audioContext={inst.host?.context ?? null}
+          host={inst.host ?? null}
           engineDescriptor={inst.descriptor}
           fxDescriptor={inst.fxDescriptor}
           magicDescriptor={inst.magicDescriptor}

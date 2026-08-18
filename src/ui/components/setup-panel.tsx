@@ -3,6 +3,8 @@
 import { useMemo, type JSX } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
 import { addressOf } from '@/audio/param-space';
+import type { EngineHost } from '@/audio/engine-host';
+import { AudioSetup } from './audio-setup';
 import { DevicePanel } from './device-panel';
 import { MidiPanel, type MappableParam } from './midi-panel';
 import { HandControlPanel } from './hand-control-panel';
@@ -14,6 +16,8 @@ import type { KitHandle } from '@/ui/use-kit';
 
 interface SetupPanelProps {
   audioContext: AudioContext | null;
+  /** For the buffer profile and latency readout. Null until powered on. */
+  host: EngineHost | null;
   engineDescriptor: EngineDescriptor | undefined;
   fxDescriptor: EngineDescriptor;
   magicDescriptor: EngineDescriptor;
@@ -53,7 +57,7 @@ export type SetupSection = (typeof SETUP_SECTIONS)[number];
  * app had no surface that mounted them.
  */
 export function SetupPanel({
-  audioContext, engineDescriptor, fxDescriptor, magicDescriptor,
+  audioContext, host, engineDescriptor, fxDescriptor, magicDescriptor,
   padChords, onPadChords, onParam, onNoteOn, onNoteOff, enabled,
   macroNames, kit, colour, bouncing, onRenderForKit, section, onSection, onHands, bounceMs, onBounceMs,
 }: SetupPanelProps): JSX.Element {
@@ -119,7 +123,12 @@ export function SetupPanel({
         />
       )}
 
-      {section === 'hardware' && <DevicePanel audioContext={audioContext} />}
+      {section === 'hardware' && (
+        <div className="flex flex-col gap-6">
+          <AudioSetup host={host} colour={colour} />
+          <DevicePanel audioContext={audioContext} />
+        </div>
+      )}
 
       {section === 'controllers' && (
         <MidiPanel
