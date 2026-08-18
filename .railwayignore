@@ -1,3 +1,14 @@
-# The C++ port: an 8MB VST3 bundle, 277 golden buffers and a CMake build tree.
-# None of it is used by the web app, and uploading it slows every deploy.
+# Railway installs dependencies and builds on its own machine, so uploading any
+# of this is pure wasted transfer — and it was enough to make the snapshot step
+# crawl. node_modules and .next alone are 1.3 GB.
+node_modules/
+.next/
+
+# The C++ port: a VST3 bundle, its CMake build trees and 277 golden buffers.
+# 321 MB, and the web app uses none of it.
 native/
+
+# The packaged plugin zip.
+dist/
+
+.git/
