@@ -236,6 +236,23 @@ export class MidiOut {
   controlChange(cc: number, value: number, channel = 0): void {
     this.send(encodeControlChange(cc, value, channel));
   }
+
+  /**
+   * Hand the device back.
+   *
+   * Silences everything first: a note left sounding on the hardware would keep
+   * ringing after we stop talking to it, and there would be nothing left to send
+   * the note-off. Then the port reference is dropped so nothing can send again
+   * by accident.
+   *
+   * Note the port itself is not `close()`d — CoreMIDI is multi-client, so
+   * holding a port never blocked another application, and closing would make
+   * reconnecting slower for no benefit.
+   */
+  close(): void {
+    this.allNotesOff();
+    this.port = null;
+  }
 }
 
 // --- Audio output routing ---
@@ -336,6 +353,22 @@ export async function requestKo2Device(): Promise<Ko2UsbInfo | null> {
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Point audio back at the system default, so the KO II stops receiving a stream
+ * from us. Returns false where setSinkId does not exist (Safari, Firefox, iOS),
+ * which is also the case where routing was never possible to begin with.
+ */
+export async function releaseAudioRouting(ctx: AudioContext): Promise<boolean> {
+  const withSink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+  if (typeof withSink.setSinkId !== 'function') return false;
+  try {
+    await withSink.setSinkId('');
+    return true;
+  } catch {
+    return false;
   }
 }
 

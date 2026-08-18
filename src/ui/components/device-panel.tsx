@@ -11,6 +11,7 @@ import {
   listMidiPorts,
   requestKo2Device,
   routeOutputTo,
+  releaseAudioRouting,
   type AudioOutputInfo,
   type CapabilityStatus,
   type Ko2MidiPorts,
@@ -130,11 +131,44 @@ export function DevicePanel({ audioContext, onMidiOutChange }: DevicePanelProps)
     return (): void => { live = false; };
   }, []);
 
+  const outRef = useRef<MidiOut | null>(null);
+
   useEffect(() => {
     const out = outId === null ? null : new MidiOut(outId);
+    outRef.current = out;
     notify.current?.(out);
-    return (): void => { out?.allNotesOff(); };
+    return (): void => { out?.close(); };
   }, [outId]);
+
+  /**
+   * Hand the hardware back without unplugging it.
+   *
+   * The KO II is also the target of Teenage Engineering's own EP Sample Tool, and
+   * swapping between the two by pulling the cable is exactly the friction the kit
+   * exporter exists to remove. This silences anything sounding on the device,
+   * drops the MIDI port and points audio back at the system default.
+   */
+  const disconnect = useCallback((): void => {
+    outRef.current?.close();
+    outRef.current = null;
+    setOutId(null);
+    notify.current?.(null);
+
+    if (audioContext !== null && audioContext !== undefined) {
+      void releaseAudioRouting(audioContext).then((ok): void => {
+        setSinkId('');
+        setRouteNote(
+          ok
+            ? 'Released. Audio is back on your system output and the EP Sample Tool can take the device.'
+            : 'MIDI released. Audio routing was never active in this browser, so there is nothing to hand back.',
+        );
+      });
+      return;
+    }
+    setRouteNote('Released. The EP Sample Tool can take the device now.');
+  }, [audioContext]);
+
+  const connected = outId !== null || sinkId !== '';
 
   const selectOut = useCallback((id: string): void => {
     setOutId((current) => (current === id ? null : id));
@@ -184,6 +218,36 @@ export function DevicePanel({ audioContext, onMidiOutChange }: DevicePanelProps)
                 ))}
               </ul>
             )}
+        </section>
+
+        <section
+          className="flex flex-col gap-2 border-[3px] p-2.5"
+          aria-label="Device connection"
+          style={{ borderColor: connected ? PHYSICAL : INK }}
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="label" style={{ color: connected ? PHYSICAL : INK }}>
+              {connected ? 'SIGIL is holding the device' : 'Device is free'}
+            </span>
+            <button
+              type="button"
+              disabled={!connected}
+              onClick={disconnect}
+              className="hard border-[3px] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] disabled:opacity-40"
+              style={{ borderColor: INK, background: connected ? ANALOG : 'transparent', color: connected ? '#0E0E0E' : INK }}
+            >
+              Disconnect
+            </button>
+          </div>
+          <p className="text-[11px] leading-snug" style={readable}>
+            Hands the K.O. II back so Teenage Engineering&apos;s EP Sample Tool can take it,
+            without unplugging anything. Anything still sounding on the device is silenced first.
+          </p>
+          <p className="text-[11px] leading-snug" style={readable}>
+            Worth knowing: SIGIL never claims the USB interface — it only ever reads the
+            descriptor — so the Sample Tool can always take the device over USB. What this
+            releases is the MIDI port and the audio routing.
+          </p>
         </section>
 
         <section className="flex flex-col gap-2" aria-label="MIDI inputs">
