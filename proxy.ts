@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
- * Passcode gate. Deliberately simple: one shared passcode from the
+ * Passcode gate, on the Next 16 `proxy` convention — `middleware.ts` is
+ * deprecated and warned on every build. Same behaviour, new file and export
+ * name; `config.matcher` is unchanged.
+ *
+ * Deliberately simple: one shared passcode from the
  * SIGIL_PASSCODE environment variable, a SHA-256 of it in an HttpOnly cookie.
  * This keeps the instrument private until real accounts land — it is a door,
  * not a vault. When SIGIL_PASSCODE is unset (local dev), the gate stays open.
@@ -17,7 +21,7 @@ async function sha256Hex(text: string): Promise<string> {
     .join('');
 }
 
-export async function middleware(req: NextRequest): Promise<NextResponse> {
+export async function proxy(req: NextRequest): Promise<NextResponse> {
   const passcode = process.env.SIGIL_PASSCODE;
   if (!passcode) return NextResponse.next();
 
