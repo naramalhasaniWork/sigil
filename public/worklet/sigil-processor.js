@@ -69,6 +69,15 @@ var VoiceManager = class {
     slot.busy = true;
     slot.voice.noteOn(this.tuning.frequency(midiNote), velocity, slot.index);
   }
+  /** Releases everything sounding — used when switching engines. */
+  allNotesOff() {
+    for (const s of this.slots) {
+      if (s.busy) {
+        s.held = false;
+        s.voice.noteOff();
+      }
+    }
+  }
   noteOff(midiNote) {
     for (const s of this.slots) {
       if (s.busy && s.held && s.note === midiNote) {
@@ -507,6 +516,10 @@ var AnalogEngine = {
   allocVoice: (sampleRate2) => new AnalogVoice(sampleRate2)
 };
 
+// src/dsp/registry.ts
+var ENGINES = [AnalogEngine];
+var DEFAULT_ENGINE_ID = "analog";
+
 // src/audio/param-transport.ts
 function forEachParam(packed, fn) {
   for (let i = 0; i + 1 < packed.length; i += 2) {
@@ -516,25 +529,87 @@ function forEachParam(packed, fn) {
 
 // src/audio/worklet/sigil-processor.ts
 var SigilProcessor = class extends AudioWorkletProcessor {
-  vm = new VoiceManager(AnalogEngine, sampleRate, 16);
-  constructor() {
-    super();
+  managers = /* @__PURE__ */ new Map();
+  active;
+  constructor(options) {
+    super(options);
+    for (const engine of ENGINES) {
+      this.managers.set(engine.descriptor.id, new VoiceManager(engine, sampleRate, 16));
+    }
+    const fallback = this.managers.get(DEFAULT_ENGINE_ID);
+    if (!fallback) throw new Error("default engine missing from registry");
+    this.active = fallback;
+    const opts = options?.processorOptions;
+    if (opts) {
+      const engineId = opts["engineId"];
+      if (typeof engineId === "string") {
+        const vm = this.managers.get(engineId);
+        if (vm) this.active = vm;
+      }
+      const values = opts["params"];
+      if (values instanceof Float32Array) {
+        for (let i = 0; i < values.length; i++) {
+          this.active.setParam(i, values[i]);
+        }
+      }
+      const note = opts["midiNote"];
+      if (typeof note === "number") this.active.noteOn(note, 1);
+      const releaseAt = opts["releaseAtSample"];
+      if (typeof releaseAt === "number") this.releaseAtSample = releaseAt;
+      const held = opts["midiNote"];
+      if (typeof held === "number") this.heldNote = held;
+    }
     this.port.onmessage = (e) => {
       const msg = e.data;
-      if (msg.type === "noteOn") this.vm.noteOn(msg.note, msg.velocity);
-      else if (msg.type === "noteOff") this.vm.noteOff(msg.note);
-      else forEachParam(msg.data, (i, v) => {
-        this.vm.setParam(i, v);
-      });
+      switch (msg.type) {
+        case "noteOn":
+          this.active.noteOn(msg.note, msg.velocity);
+          break;
+        case "noteOff":
+          this.active.noteOff(msg.note);
+          break;
+        case "params":
+          forEachParam(msg.data, (i, v) => {
+            this.active.setParam(i, v);
+          });
+          break;
+        case "setEngine": {
+          const next = this.managers.get(msg.engineId);
+          if (next && next !== this.active) {
+            this.active.allNotesOff();
+            this.active = next;
+          }
+          break;
+        }
+        case "tuning":
+          for (const vm of this.managers.values()) {
+            vm.tuning.setEqualDivisions(msg.divisions);
+            vm.tuning.setReference(msg.refNote, msg.refHz);
+          }
+          break;
+        case "allNotesOff":
+          this.active.allNotesOff();
+          break;
+      }
     };
   }
+  releaseAtSample = -1;
+  heldNote = -1;
+  samplesRendered = 0;
   process(_inputs, outputs) {
     const output = outputs[0];
     if (!output) return true;
     const left = output[0];
     if (!left) return true;
     left.fill(0);
-    this.vm.render(left, left.length);
+    this.active.render(left, left.length);
+    if (this.releaseAtSample >= 0 && this.heldNote >= 0) {
+      this.samplesRendered += left.length;
+      if (this.samplesRendered >= this.releaseAtSample) {
+        this.active.noteOff(this.heldNote);
+        this.heldNote = -1;
+      }
+    }
     for (let ch = 1; ch < output.length; ch++) {
       output[ch]?.set(left);
     }

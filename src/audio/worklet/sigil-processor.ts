@@ -1,5 +1,5 @@
 import { VoiceManager } from '@/dsp/voice-manager';
-import { AnalogEngine } from '@/dsp/analog-voice';
+import { ENGINES, DEFAULT_ENGINE_ID } from '@/dsp/registry';
 import { forEachParam } from '@/audio/param-transport';
 
 interface NoteOnMessage {
@@ -15,30 +15,114 @@ interface ParamMessage {
   type: 'params';
   data: Float32Array;
 }
-type InboundMessage = NoteOnMessage | NoteOffMessage | ParamMessage;
+interface EngineMessage {
+  type: 'setEngine';
+  engineId: string;
+}
+interface TuningMessage {
+  type: 'tuning';
+  divisions: number;
+  refNote: number;
+  refHz: number;
+}
+interface AllNotesOffMessage {
+  type: 'allNotesOff';
+}
+type InboundMessage =
+  | NoteOnMessage
+  | NoteOffMessage
+  | ParamMessage
+  | EngineMessage
+  | TuningMessage
+  | AllNotesOffMessage;
 
 declare const sampleRate: number;
 declare abstract class AudioWorkletProcessor {
   readonly port: MessagePort;
-  constructor();
+  constructor(options?: { processorOptions?: Record<string, unknown> });
 }
 declare function registerProcessor(
   name: string,
-  ctor: new () => AudioWorkletProcessor,
+  ctor: new (options?: { processorOptions?: Record<string, unknown> }) => AudioWorkletProcessor,
 ): void;
 
+/**
+ * One VoiceManager per engine, all built up front. Switching engines is then a
+ * pointer swap rather than an allocation on the audio thread.
+ */
 class SigilProcessor extends AudioWorkletProcessor {
-  private readonly vm = new VoiceManager(AnalogEngine, sampleRate, 16);
+  private readonly managers = new Map<string, VoiceManager>();
+  private active: VoiceManager;
 
-  constructor() {
-    super();
+  constructor(options?: { processorOptions?: Record<string, unknown> }) {
+    super(options);
+
+    for (const engine of ENGINES) {
+      this.managers.set(engine.descriptor.id, new VoiceManager(engine, sampleRate, 16));
+    }
+    const fallback = this.managers.get(DEFAULT_ENGINE_ID);
+    if (!fallback) throw new Error('default engine missing from registry');
+    this.active = fallback;
+
+    // Offline rendering never delivers postMessage before it finishes, so the
+    // bounce path configures the processor here instead.
+    const opts = options?.processorOptions;
+    if (opts) {
+      const engineId = opts['engineId'];
+      if (typeof engineId === 'string') {
+        const vm = this.managers.get(engineId);
+        if (vm) this.active = vm;
+      }
+      const values = opts['params'];
+      if (values instanceof Float32Array) {
+        for (let i = 0; i < values.length; i++) {
+          this.active.setParam(i, values[i] as number);
+        }
+      }
+      const note = opts['midiNote'];
+      if (typeof note === 'number') this.active.noteOn(note, 1);
+      const releaseAt = opts['releaseAtSample'];
+      if (typeof releaseAt === 'number') this.releaseAtSample = releaseAt;
+      const held = opts['midiNote'];
+      if (typeof held === 'number') this.heldNote = held;
+    }
+
     this.port.onmessage = (e: MessageEvent<InboundMessage>): void => {
       const msg = e.data;
-      if (msg.type === 'noteOn') this.vm.noteOn(msg.note, msg.velocity);
-      else if (msg.type === 'noteOff') this.vm.noteOff(msg.note);
-      else forEachParam(msg.data, (i, v) => { this.vm.setParam(i, v); });
+      switch (msg.type) {
+        case 'noteOn':
+          this.active.noteOn(msg.note, msg.velocity);
+          break;
+        case 'noteOff':
+          this.active.noteOff(msg.note);
+          break;
+        case 'params':
+          forEachParam(msg.data, (i, v) => { this.active.setParam(i, v); });
+          break;
+        case 'setEngine': {
+          const next = this.managers.get(msg.engineId);
+          if (next && next !== this.active) {
+            this.active.allNotesOff();
+            this.active = next;
+          }
+          break;
+        }
+        case 'tuning':
+          for (const vm of this.managers.values()) {
+            vm.tuning.setEqualDivisions(msg.divisions);
+            vm.tuning.setReference(msg.refNote, msg.refHz);
+          }
+          break;
+        case 'allNotesOff':
+          this.active.allNotesOff();
+          break;
+      }
     };
   }
+
+  private releaseAtSample = -1;
+  private heldNote = -1;
+  private samplesRendered = 0;
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const output = outputs[0];
@@ -47,7 +131,15 @@ class SigilProcessor extends AudioWorkletProcessor {
     if (!left) return true;
 
     left.fill(0);
-    this.vm.render(left, left.length);
+    this.active.render(left, left.length);
+
+    if (this.releaseAtSample >= 0 && this.heldNote >= 0) {
+      this.samplesRendered += left.length;
+      if (this.samplesRendered >= this.releaseAtSample) {
+        this.active.noteOff(this.heldNote);
+        this.heldNote = -1;
+      }
+    }
 
     for (let ch = 1; ch < output.length; ch++) {
       output[ch]?.set(left);

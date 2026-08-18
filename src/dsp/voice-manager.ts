@@ -68,6 +68,16 @@ export class VoiceManager {
     slot.voice.noteOn(this.tuning.frequency(midiNote), velocity, slot.index);
   }
 
+  /** Releases everything sounding — used when switching engines. */
+  allNotesOff(): void {
+    for (const s of this.slots) {
+      if (s.busy) {
+        s.held = false;
+        s.voice.noteOff();
+      }
+    }
+  }
+
   noteOff(midiNote: number): void {
     for (const s of this.slots) {
       if (s.busy && s.held && s.note === midiNote) {

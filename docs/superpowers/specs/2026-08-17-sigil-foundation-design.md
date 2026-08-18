@@ -261,8 +261,13 @@ hard-offset in `--ink`, zero blur, **reserved for pressable controls** so they m
 
 - **Colour is functional.** An engine's colour follows it everywhere — rail, modulation
   chips, macro values, pad grid. A patch is readable at a glance.
-- **Shape is semantic.** Circle = continuous, square = discrete/stepped, triangle =
-  envelope. Modulation is dragging a coloured shape onto a control.
+- **Marks are signal behaviour, not primary shapes.** The circle/square/triangle motif was
+  cut on 2026-08-17 as generic — it belonged to the borrowed landing-page spec, not to this
+  instrument. Each engine's mark instead draws what that engine does to a signal: Analog is
+  a sawtooth ramp and its hard reset, FM is two waves beating, Physical is a strike followed
+  by decaying resonance, Granular is a scatter of grains. Constructed glyphs, hard strokes,
+  no fills — which is also what makes them read as sigils. Modulation is dragging an
+  engine's mark onto a control.
 - **No submenus for the interesting parts.** Everything that changes the sound lives on one
   surface. Deep view expands in place; it does not navigate away.
 - **Two documented rule-breaks**, because the alternative is worse: inactive engine labels
