@@ -1,0 +1,3 @@
+# The C++ port: an 8MB VST3 bundle, 277 golden buffers and a CMake build tree.
+# None of it is used by the web app, and uploading it slows every deploy.
+native/
