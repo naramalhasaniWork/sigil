@@ -313,10 +313,27 @@ export function useSong(inst: SongInstrument): SongDeck {
     if (prev === selectedTrackId) return;
     leaving.current = selectedTrackId;
     const a = arrRef.current;
-    const patch = instRef.current.exportPatch();
+    const inst = instRef.current;
+    const patch = inst.exportPatch();
     if (patch !== null) a.setTrackPatch(prev, patch);
     const track = a.arrangement.tracks.find((t) => t.id === selectedTrackId);
-    if (track !== undefined) instRef.current.applySound(track.engineId, track.patch);
+    if (track !== undefined) {
+      if (track.patch === undefined) {
+        /*
+         * An empty track ADOPTS the sound you are holding; it does not replace
+         * it. Arming REC selects the target cell's track, so with the old
+         * behaviour recording a part while playing FM snapped the instrument
+         * back to the scratch track's default engine mid-gesture — you pressed
+         * record and lost your sound. A track that has never been given a
+         * patch has no opinion worth enforcing, and the sound under your hands
+         * is the only thing either of you actually chose.
+         */
+        a.setTrackEngine(track.id, inst.engineId);
+        if (patch !== null) a.setTrackPatch(track.id, patch);
+      } else {
+        inst.applySound(track.engineId, track.patch);
+      }
+    }
     // The newly live track gives its pool node back; the one being left picks
     // one up, so what it plays keeps sounding like itself.
     pool.release(selectedTrackId);

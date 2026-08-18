@@ -450,9 +450,6 @@ export default function Page(): JSX.Element {
           <div className="flex overflow-x-auto border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
             {(['sculpt', 'deep', 'fx', 'hunt', 'export', 'setup'] as const).map((v) => (
               <Fragment key={v}>
-                {v === 'hunt' && (
-                  <ScopeSwitch scope={song.arr.scope} onScope={song.arr.setScope} colour={colour} />
-                )}
                 <button
                   type="button"
                   aria-pressed={view === v}
@@ -477,6 +474,20 @@ export default function Page(): JSX.Element {
                 </button>
               </Fragment>
             ))}
+
+            {/*
+              Pushed to the far right, past every instrument tab.
+
+              SIGIL is a sound-design instrument first; SONG is a second mode
+              still being worked out. Its position says which is which — the
+              tabs lead, and arranging is somewhere you go deliberately rather
+              than somewhere you land. ml-auto rather than a spacer so it stays
+              pinned right at any width, and the doubled border keeps it reading
+              as a different KIND of control rather than a seventh tab.
+            */}
+            <div className="ml-auto shrink-0 flex border-l-[3px]" style={{ borderColor: 'var(--ink)' }}>
+              <ScopeSwitch scope={song.arr.scope} onScope={song.arr.setScope} colour={colour} />
+            </div>
           </div>
 
           {songScope && (
