@@ -226,11 +226,17 @@ class FmVoice implements EngineVoice {
       this.fbZ1 = m3 < DENORM && m3 > -DENORM ? 0 : m3;
 
       let y = 0;
+      // Review finding 2026-08-18: operator 4 (the feedback op) was computed
+      // every sample but never READ in algos 0/1, and `index` was absent from
+      // algo 3 — so the Grit macro was silent on two algorithms and Air on a
+      // third. Every algorithm now routes both.
       if (algo === 0) {
-        const m1 = Math.sin(this.ph1 * TAU) * l1 * e1 * index;
+        // 2-stack, with op4 shading the modulator: op4 -> op2 -> op1
+        const m1 = Math.sin(this.ph1 * TAU + m3 * index) * l1 * e1 * index;
         y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0;
       } else if (algo === 1) {
-        const m2 = Math.sin(this.ph2 * TAU) * l2 * e2 * index;
+        // 3-stack: op4 -> op3 -> op2 -> op1
+        const m2 = Math.sin(this.ph2 * TAU + m3 * index) * l2 * e2 * index;
         const m1 = Math.sin(this.ph1 * TAU + m2) * l1 * e1 * index;
         y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0;
       } else if (algo === 2) {
@@ -238,9 +244,12 @@ class FmVoice implements EngineVoice {
         y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0
           + Math.sin(this.ph2 * TAU + m3 * index) * l2 * e2 * g2;
       } else if (algo === 3) {
-        y = Math.sin(this.ph0 * TAU) * l0 * e0 * g0
-          + Math.sin(this.ph1 * TAU) * l1 * e1 * g1
-          + Math.sin(this.ph2 * TAU) * l2 * e2 * g2
+        // Parallel carriers, all shaded by op4 scaled by index, so both the
+        // Air and Grit macros are audible here rather than dead.
+        const shade = m3 * index * 0.5;
+        y = Math.sin(this.ph0 * TAU + shade) * l0 * e0 * g0
+          + Math.sin(this.ph1 * TAU + shade * 1.4) * l1 * e1 * g1
+          + Math.sin(this.ph2 * TAU + shade * 0.7) * l2 * e2 * g2
           + m3 * g3;
       } else {
         const m2 = Math.sin(this.ph2 * TAU) * l2 * e2 * index;

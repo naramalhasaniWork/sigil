@@ -295,7 +295,7 @@ export default function Page(): JSX.Element {
           <PadGrid
             rows={4}
             cols={4}
-            root={48}
+            root={12 * (octave - 1)}
             scale="minor"
             mode="chords"
             colour={colour}

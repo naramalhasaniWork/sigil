@@ -204,3 +204,51 @@ describe('FmVoice', () => {
     expect(after - before).toBeLessThan(64 * 1024);
   });
 });
+
+// Regression for the dead-macro review finding: feedback (Grit) and index
+// (Air) must audibly change the output in EVERY algorithm, not just some.
+describe('FM macros are live in every algorithm', () => {
+  const SR2 = 48000;
+  const renderTail = (algo: number, paramId: string, value: number): Float32Array => {
+    const params = FmEngine.descriptor.params;
+    const algoIdx = params.findIndex((p) => p.id === 'algorithm');
+    const targetIdx = params.findIndex((p) => p.id === paramId);
+    const v = FmEngine.allocVoice(SR2);
+    if (algoIdx >= 0) v.setParam(algoIdx, algo);
+    if (targetIdx >= 0) v.setParam(targetIdx, value);
+    v.noteOn(220, 1, 0);
+    const out = new Float32Array(8192);
+    v.render(out, 0, 8192);
+    return out;
+  };
+
+  const maxDiff = (a: Float32Array, b: Float32Array): number => {
+    let d = 0;
+    for (let i = 2048; i < a.length; i++) {
+      const x = Math.abs((a[i] as number) - (b[i] as number));
+      if (x > d) d = x;
+    }
+    return d;
+  };
+
+  const algoParam = FmEngine.descriptor.params.find((p) => p.id === 'algorithm');
+  const algoCount = algoParam?.steps ?? 5;
+
+  for (let algo = 0; algo < algoCount; algo++) {
+    it(`feedback changes the sound in algorithm ${algo}`, () => {
+      const fb = FmEngine.descriptor.params.find((p) => p.id === 'feedback');
+      expect(fb).toBeDefined();
+      const lo = renderTail(algo, 'feedback', fb?.min ?? 0);
+      const hi = renderTail(algo, 'feedback', fb?.max ?? 1);
+      expect(maxDiff(lo, hi)).toBeGreaterThan(1e-4);
+    });
+
+    it(`index changes the sound in algorithm ${algo}`, () => {
+      const ix = FmEngine.descriptor.params.find((p) => p.id === 'index');
+      expect(ix).toBeDefined();
+      const lo = renderTail(algo, 'index', ix?.min ?? 0);
+      const hi = renderTail(algo, 'index', ix?.max ?? 12);
+      expect(maxDiff(lo, hi)).toBeGreaterThan(1e-4);
+    });
+  }
+});

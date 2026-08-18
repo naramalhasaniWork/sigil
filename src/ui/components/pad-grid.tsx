@@ -213,7 +213,6 @@ export function PadGrid({
               fontWeight: 700,
               fontSize: mode === 'chords' ? '15px' : '13px',
               letterSpacing: '0.14em',
-              textTransform: 'uppercase',
               touchAction: 'none',
               userSelect: 'none',
               WebkitUserSelect: 'none',
