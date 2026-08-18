@@ -239,6 +239,10 @@ export function useInstrument() {
   const loadValues = useCallback((next: Float32Array): void => {
     setValues((prev) => ({ ...prev, [engineId]: Float32Array.from(next) }));
     hostRef.current?.setAllParams(next);
+    // A new patch is a new starting point, and the macros are back at neutral
+    // because they have not been moved away from it yet.
+    anchorRef.current[engineId] = Float32Array.from(next);
+    setMacros([0.5, 0.5, 0.5, 0.5]);
   }, [engineId]);
 
   /**
@@ -511,6 +515,21 @@ export function useInstrument() {
   const [macros, setMacros] = useState<[number, number, number, number]>([0.5, 0.5, 0.5, 0.5]);
 
   /*
+   * What the macros modulate FROM: the patch as it was last loaded, per engine.
+   *
+   * They used to work from each parameter's descriptor DEFAULT, which meant one
+   * nudge of a macro threw away the preset you were sitting on. Loading
+   * "Cathedral Drift" and moving Body by 4% jumped Sub from 0.15 to 0.462 —
+   * a 3x change — because the preset's value was discarded in favour of one
+   * derived from the factory 0.30. Every macro on every engine did this.
+   *
+   * Anchoring on the loaded patch also makes 0.5 mean something: centre is the
+   * patch untouched, so returning a macro to the middle actually returns the
+   * sound. It could not before, and the "50" on the row was decoration.
+   */
+  const anchorRef = useRef<Record<string, Float32Array>>({});
+
+  /*
    * Macros re-centre when you change engine — four dials that mean something
    * different per engine cannot keep their old positions. Undo is the one
    * exception: restoring a snapshot that came from another engine has to land
@@ -541,8 +560,14 @@ export function useInstrument() {
         const p = descriptor.params[i];
         if (!p || p.macro !== index) continue;
         const depth = p.macroDepth ?? 1;
-        const base = normalise(p.default, p);
-        const target = base + (value - base) * depth;
+        const anchored = anchorRef.current[engineId]?.[i];
+        const base = normalise(anchored ?? p.default, p);
+        /*
+         * Doubling keeps the ends where they were — a depth-1 macro still
+         * sweeps the full range when the anchor sits mid-travel — while making
+         * the centre mean "leave the patch alone".
+         */
+        const target = base + (value - 0.5) * 2 * depth;
         const real = denormalise(Math.min(1, Math.max(0, target)), p);
         out[i] = real;
         host?.setParam(i, real);
@@ -949,6 +974,9 @@ export function useInstrument() {
 
     setValues((prev) => ({ ...prev, [snap.engineId]: Float32Array.from(snap.values) }));
     host?.setAllParams(snap.values);
+    // Undo restores the macro POSITIONS too, so the anchor has to be the patch
+    // those positions were measured against, not whatever was loaded last.
+    anchorRef.current[snap.engineId] = Float32Array.from(snap.values);
 
     setFxValues(Float32Array.from(snap.fx));
     for (let i = 0; i < snap.fx.length; i++) {
