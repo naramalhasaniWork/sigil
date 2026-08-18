@@ -201,6 +201,8 @@ export const TOOLS: readonly ToolSpec[] = [
       name: S.str('Rename.'),
       presetId: S.str('Replace the sound with this preset.'),
       values: S.map('Parameter overrides merged onto the current patch.'),
+      fx: S.map('Effects-chain overrides, merged onto the track\'s current chain.'),
+      character: S.map('Character-chain overrides, merged onto the current chain.'),
       gain: S.numb('0..1.'),
       pan: S.numb('-1..1.'),
       muted: S.bool('Mute.'),

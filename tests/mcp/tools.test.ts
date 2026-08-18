@@ -767,3 +767,63 @@ describe('a whole short piece, composed by tool call', () => {
     expect(JSON.stringify(read.arrangement)).not.toContain('Float32Array');
   });
 });
+
+/*
+ * update_track rebuilds the whole patch, so anything not passed back in is
+ * lost. It used to never pass fx or magic, which meant nudging one parameter
+ * silently deleted the track's entire effects and character chains — and its
+ * schema had no fx or character property, so a model could not restore what it
+ * had just destroyed. Nothing asserted the chains survived, so the suite was
+ * green on it.
+ */
+describe('update_track keeps what it was not asked to change', () => {
+  async function trackWithChains(): Promise<{ store: ArrangementStore; ids: {
+    arrangementId: string; trackId: string;
+  } }> {
+    const store = createMemoryStore();
+    const arr = await ok<{ arrangement: { id: string } }>(createArrangement(store, { name: 'Chains' }));
+    const arrangementId = arr.arrangement.id;
+    const added = await ok<{ track: { id: string } }>(addTrack(store, {
+      arrangementId, name: 'Bass', engineId: 'analog',
+      fx: { 'drive-amount': 0.7 },
+      character: { 'shimmer-mix': 0.4 },
+    }));
+    const trackId = added.track.id;
+    return { store, ids: { arrangementId, trackId } };
+  }
+
+  it('preserves the fx chain when only values change', async () => {
+    const { store, ids } = await trackWithChains();
+    const updated = await ok<{ track: { patch?: { fx?: Record<string, number> } } }>(
+      updateTrack(store, { ...ids, values: { 'filter-cutoff': 900 } }),
+    );
+    expect(updated.track.patch?.fx?.['drive-amount']).toBeCloseTo(0.7, 5);
+  });
+
+  it('preserves the character chain when only values change', async () => {
+    const { store, ids } = await trackWithChains();
+    const updated = await ok<{ track: { patch?: { magic?: Record<string, number> } } }>(
+      updateTrack(store, { ...ids, values: { 'filter-cutoff': 900 } }),
+    );
+    expect(updated.track.patch?.magic?.['shimmer-mix']).toBeCloseTo(0.4, 5);
+  });
+
+  it('preserves the chains when only the name changes', async () => {
+    const { store, ids } = await trackWithChains();
+    await ok(updateTrack(store, { ...ids, name: 'Renamed' }));
+    const after = await ok<{
+      arrangement: { tracks: { patch?: { fx?: Record<string, number> } }[] };
+    }>(getArrangement(store, { arrangementId: ids.arrangementId }));
+    expect(after.arrangement.tracks[0]?.patch?.fx?.['drive-amount']).toBeCloseTo(0.7, 5);
+  });
+
+  /* And the repair path the schema now permits. */
+  it('merges an fx override onto the existing chain rather than replacing it', async () => {
+    const { store, ids } = await trackWithChains();
+    const updated = await ok<{ track: { patch?: { fx?: Record<string, number> } } }>(
+      updateTrack(store, { ...ids, fx: { 'reverb-mix': 0.3 } }),
+    );
+    expect(updated.track.patch?.fx?.['reverb-mix']).toBeCloseTo(0.3, 5);
+    expect(updated.track.patch?.fx?.['drive-amount']).toBeCloseTo(0.7, 5);
+  });
+});

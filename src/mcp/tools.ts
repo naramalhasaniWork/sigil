@@ -724,14 +724,40 @@ export function updateTrack(store: ArrangementStore, args: unknown): Promise<Too
 
     const presetId = optStr(o, 'presetId');
     const values = keyedNumbers(o, 'values');
-    if (presetId !== undefined || values !== undefined) {
+    const fx = keyedNumbers(o, 'fx');
+    const magic = keyedNumbers(o, 'character') ?? keyedNumbers(o, 'magic');
+
+    if (
+      presetId !== undefined || values !== undefined
+      || fx !== undefined || magic !== undefined
+    ) {
       const base = presetId === undefined && track.patch !== undefined
         ? { ...track.patch.values }
         : undefined;
+      /*
+       * Carry the chains forward.
+       *
+       * This rebuilds the whole patch, so anything not passed back in is gone.
+       * Previously fx and magic were never passed, which meant setting one
+       * parameter value silently deleted the track's entire effects and
+       * character chains — and the schema had no way to put them back, so a
+       * model could not repair what it had just destroyed. Merge like
+       * modify_patch does: what is already there, overridden by what was asked
+       * for.
+       */
+      const mergedFx = fx === undefined
+        ? track.patch?.fx
+        : { ...(track.patch?.fx ?? {}), ...fx };
+      const mergedMagic = magic === undefined
+        ? track.patch?.magic
+        : { ...(track.patch?.magic ?? {}), ...magic };
+
       const built = buildPatch({
         engineId: track.engineId,
         ...(base === undefined ? {} : { base: { ...base, ...(values ?? {}) } }),
         ...(base === undefined ? { presetId, values } : {}),
+        ...(mergedFx === undefined ? {} : { fx: mergedFx }),
+        ...(mergedMagic === undefined ? {} : { magic: mergedMagic }),
         name: track.name,
       });
       track.patch = built.patch;
