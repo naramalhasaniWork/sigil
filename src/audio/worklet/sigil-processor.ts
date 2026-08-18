@@ -1,6 +1,9 @@
 import { VoiceManager } from '@/dsp/voice-manager';
 import { ENGINES, DEFAULT_ENGINE_ID } from '@/dsp/registry';
 import { forEachParam } from '@/audio/param-transport';
+import { sectionOf } from '@/audio/param-space';
+import { FxChain } from '@/dsp/fx';
+import { MagicChain } from '@/dsp/fx-magic';
 
 interface NoteOnMessage {
   type: 'noteOn';
@@ -53,9 +56,14 @@ declare function registerProcessor(
 class SigilProcessor extends AudioWorkletProcessor {
   private readonly managers = new Map<string, VoiceManager>();
   private active: VoiceManager;
+  private readonly fx: FxChain;
+  private readonly magic: MagicChain;
 
   constructor(options?: { processorOptions?: Record<string, unknown> }) {
     super(options);
+
+    this.fx = new FxChain(sampleRate);
+    this.magic = new MagicChain(sampleRate);
 
     for (const engine of ENGINES) {
       this.managers.set(engine.descriptor.id, new VoiceManager(engine, sampleRate, 16));
@@ -106,7 +114,12 @@ class SigilProcessor extends AudioWorkletProcessor {
           this.active.noteOff(msg.note);
           break;
         case 'params':
-          forEachParam(msg.data, (i, v) => { this.active.setParam(i, v); });
+          forEachParam(msg.data, (address, v) => {
+            const { section, index } = sectionOf(address);
+            if (section === 'fx') this.fx.setParam(index, v);
+            else if (section === 'magic') this.magic.setParam(index, v);
+            else this.active.setParam(index, v);
+          });
           break;
         case 'setEngine': {
           const next = this.managers.get(msg.engineId);
@@ -141,6 +154,8 @@ class SigilProcessor extends AudioWorkletProcessor {
 
     left.fill(0);
     this.active.render(left, left.length);
+    this.fx.process(left, left.length);
+    this.magic.process(left, left.length);
 
     if (this.releaseAtSample >= 0 && this.bounceNotes.length > 0) {
       this.samplesRendered += left.length;

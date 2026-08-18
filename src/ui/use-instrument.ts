@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
 import { EngineHost } from '@/audio/engine-host';
 import { bouncePatch } from '@/audio/bounce';
+import { FX_DESCRIPTOR } from '@/dsp/fx-descriptor';
+import { FX_MAGIC_DESCRIPTOR } from '@/dsp/fx-magic-descriptor';
+import { addressOf } from '@/audio/param-space';
 import { KO2_SAMPLE_RATE } from '@/audio/wav';
 import { ENGINES, DEFAULT_ENGINE_ID } from '@/dsp/registry';
 import { PRESETS, presetToValues } from '@/dsp/presets';
@@ -63,6 +66,28 @@ export function useInstrument() {
     return initial;
   });
 
+  // ---- FX ---------------------------------------------------------------
+  const [fxValues, setFxValues] = useState<Float32Array>(() => defaultsFor(FX_DESCRIPTOR));
+  const [magicValues, setMagicValues] = useState<Float32Array>(() => defaultsFor(FX_MAGIC_DESCRIPTOR));
+
+  const setFxParam = useCallback((index: number, value: number): void => {
+    setFxValues((prev) => {
+      const next = Float32Array.from(prev);
+      next[index] = value;
+      return next;
+    });
+    hostRef.current?.setParam(addressOf('fx', index), value);
+  }, []);
+
+  const setMagicParam = useCallback((index: number, value: number): void => {
+    setMagicValues((prev) => {
+      const next = Float32Array.from(prev);
+      next[index] = value;
+      return next;
+    });
+    hostRef.current?.setParam(addressOf('magic', index), value);
+  }, []);
+
   const engine = useMemo(
     () => ENGINES.find((e) => e.descriptor.id === engineId) ?? ENGINES[0],
     [engineId],
@@ -91,8 +116,14 @@ export function useInstrument() {
     hostRef.current.setEngine(engineId);
     const v = values[engineId];
     if (v) hostRef.current.setAllParams(v);
+    for (let i = 0; i < fxValues.length; i++) {
+      hostRef.current.setParam(addressOf('fx', i), fxValues[i] as number);
+    }
+    for (let i = 0; i < magicValues.length; i++) {
+      hostRef.current.setParam(addressOf('magic', i), magicValues[i] as number);
+    }
     setStarted(true);
-  }, [engineId, values]);
+  }, [engineId, values, fxValues, magicValues]);
 
   const selectEngine = useCallback((id: string): void => {
     setEngineId(id);
@@ -369,6 +400,8 @@ export function useInstrument() {
     userPresets: userPresetsForEngine, savePreset, loadUserPreset, deleteUserPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep,
     macros, setMacro, macroNames,
+    fxDescriptor: FX_DESCRIPTOR, fxValues, setFxParam,
+    magicDescriptor: FX_MAGIC_DESCRIPTOR, magicValues, setMagicParam,
     status, setStatus,
     engineTrim: ENGINE_TRIM[engineId] ?? 1,
   };

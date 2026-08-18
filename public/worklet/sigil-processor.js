@@ -2631,12 +2631,1470 @@ function forEachParam(packed, fn) {
   }
 }
 
+// src/audio/param-space.ts
+var FX_PARAM_BASE = 1e3;
+var MAGIC_PARAM_BASE = 2e3;
+function sectionOf(address) {
+  if (address >= MAGIC_PARAM_BASE) {
+    return { section: "magic", index: address - MAGIC_PARAM_BASE };
+  }
+  if (address >= FX_PARAM_BASE) {
+    return { section: "fx", index: address - FX_PARAM_BASE };
+  }
+  return { section: "engine", index: address };
+}
+
+// src/dsp/fx-descriptor.ts
+var FX_DESCRIPTOR = {
+  id: "fx",
+  name: "Effects",
+  colour: "#7C9CFF",
+  macroNames: ["Space", "Motion", "Grit", "Echo"],
+  params: [
+    {
+      id: "drive-amount",
+      name: "Drive",
+      group: "Drive",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.2,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.7,
+      mutability: 0.9,
+      explain: "Pushes the whole mix into soft saturation, rounding peaks off and adding harmonics that were never in the notes. Level is compensated, so this changes character and weight rather than loudness."
+    },
+    {
+      id: "drive-tone",
+      name: "Drive Tone",
+      group: "Drive",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.5,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Tilts what the saturator hears: low settings feed it bass so the grit lands underneath, high settings feed it treble so the grit lands on top. Centre is flat and neutral."
+    },
+    {
+      id: "crush-rate",
+      name: "Downsample",
+      group: "Crush",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Throws away sample rate by holding each value for longer, which folds bright content back down into ringing metallic overtones. This is the sound of cheap samplers, used on purpose."
+    },
+    {
+      id: "crush-bits",
+      name: "Bit Depth",
+      group: "Crush",
+      unit: "none",
+      min: 2,
+      max: 16,
+      default: 16,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "How many steps the signal is allowed to sit on. Sixteen is transparent; below eight the quiet tails turn gritty and granular because there is no longer a small enough step to describe them."
+    },
+    {
+      id: "chorus-rate",
+      name: "Chorus Rate",
+      group: "Chorus",
+      unit: "hz",
+      min: 0.05,
+      max: 6,
+      default: 0.45,
+      curve: "exp",
+      mutability: 0.7,
+      explain: "How fast the chorus delay lines wobble. Slow is a gentle drift that reads as analogue instability; fast becomes an obvious warble or vibrato."
+    },
+    {
+      id: "chorus-depth",
+      name: "Chorus Depth",
+      group: "Chorus",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.35,
+      curve: "linear",
+      macro: 1,
+      macroDepth: 0.6,
+      mutability: 0.9,
+      explain: "How far the wobble moves each delay line. More depth means more detuning against the dry signal, which is what turns one voice into an ensemble."
+    },
+    {
+      id: "chorus-width",
+      name: "Chorus Width",
+      group: "Chorus",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.6,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Spreads the three chorus voices apart in both delay time and wobble speed. Low keeps them nearly on top of each other for a tight doubling; high scatters them into a wide, lush smear."
+    },
+    {
+      id: "chorus-mix",
+      name: "Chorus Mix",
+      group: "Chorus",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.2,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "How much of the wobbling copies you hear against the original. At zero the chorus is bypassed exactly; past halfway the dry signal steps back and the sound starts to swim."
+    },
+    {
+      id: "delay-time",
+      name: "Delay Time",
+      group: "Delay",
+      unit: "ms",
+      min: 1,
+      max: 2e3,
+      default: 340,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "The gap before the first repeat. Under about 30ms it stops sounding like an echo and starts sounding like a resonant tube; long settings turn playing into a conversation with yourself."
+    },
+    {
+      id: "delay-feedback",
+      name: "Feedback",
+      group: "Delay",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.4,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "How much of each repeat is fed back in to make the next one. Capped safely below runaway, so even at maximum the repeats always eventually die instead of screaming."
+    },
+    {
+      id: "delay-tone",
+      name: "Delay Tone",
+      group: "Delay",
+      unit: "hz",
+      min: 400,
+      max: 16e3,
+      default: 4e3,
+      curve: "exp",
+      mutability: 0.7,
+      explain: "A lowpass inside the feedback loop, so every repeat comes back darker than the last. This is what makes a digital delay sit behind the music like tape instead of cutting through it."
+    },
+    {
+      id: "delay-width",
+      name: "Ping-Pong",
+      group: "Delay",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.5,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Splits the delay into two lines that hand the signal back and forth at different times, so repeats bounce in a rhythm instead of landing on one steady grid. At zero it is a plain single delay."
+    },
+    {
+      id: "delay-mix",
+      name: "Delay Mix",
+      group: "Delay",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.22,
+      curve: "linear",
+      macro: 3,
+      macroDepth: 0.6,
+      mutability: 0.8,
+      explain: "How loud the repeats are against the dry sound. At zero the delay is bypassed exactly, which matters because a delay you cannot fully turn off will always muddy a tight patch."
+    },
+    {
+      id: "reverb-predelay",
+      name: "Pre-Delay",
+      group: "Reverb",
+      unit: "ms",
+      min: 0,
+      max: 200,
+      default: 18,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "A silent gap before the reverb starts. Even 20ms keeps the attack of a note clear and dry while still letting the tail be huge, which is most of what makes a reverb sound expensive."
+    },
+    {
+      id: "reverb-size",
+      name: "Size",
+      group: "Reverb",
+      unit: "pct",
+      min: 0.15,
+      max: 1,
+      default: 0.55,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Scales every delay line in the reverb network, so the echoes inside it are further apart. Small reads as a tiled room, large as a cathedral, and it changes the tone as much as the length."
+    },
+    {
+      id: "reverb-decay",
+      name: "Decay",
+      group: "Reverb",
+      unit: "ms",
+      min: 200,
+      max: 12e3,
+      default: 2200,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "Roughly how long the tail takes to fall away to nothing. Set independently of size, so you can have a small bright room with an unnaturally long tail, or a huge hall that stops dead."
+    },
+    {
+      id: "reverb-damping",
+      name: "Damping",
+      group: "Reverb",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.5,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "How fast the high frequencies die relative to the lows, imitating air and soft furnishings. Without it a reverb tail sounds like ringing glass; with it the tail sinks warmly out of the way."
+    },
+    {
+      id: "reverb-mix",
+      name: "Reverb Mix",
+      group: "Reverb",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.25,
+      curve: "linear",
+      macro: 0,
+      macroDepth: 0.7,
+      mutability: 0.8,
+      explain: "How much tail you hear against the dry sound. This is the single biggest difference between a patch that sounds like a demo and one that sounds like a record."
+    },
+    {
+      id: "output-trim",
+      name: "Output",
+      group: "Output",
+      unit: "db",
+      min: -24,
+      max: 12,
+      default: 0,
+      curve: "linear",
+      mutability: 0.4,
+      explain: "Final level after all the effects, so you can match volume when a heavy setting makes the patch louder or quieter. A safety limiter still catches anything above the rails."
+    }
+  ]
+};
+
+// src/dsp/fx.ts
+var DENORMAL6 = 1e-20;
+var P_DRIVE2 = 0;
+var P_DRIVE_TONE = 1;
+var P_CRUSH_RATE = 2;
+var P_CRUSH_BITS = 3;
+var P_CH_RATE = 4;
+var P_CH_DEPTH = 5;
+var P_CH_WIDTH = 6;
+var P_CH_MIX = 7;
+var P_DL_TIME = 8;
+var P_DL_FB = 9;
+var P_DL_TONE = 10;
+var P_DL_WIDTH = 11;
+var P_DL_MIX = 12;
+var P_RV_PREDELAY = 13;
+var P_RV_SIZE = 14;
+var P_RV_DECAY = 15;
+var P_RV_DAMP = 16;
+var P_RV_MIX = 17;
+var P_TRIM = 18;
+var N_PARAMS = FX_DESCRIPTOR.params.length;
+var SMOOTH_MS = [25, 25, 25, 25, 30, 30, 30, 30, 80, 30, 30, 60, 30, 120, 120, 30, 40, 30, 25];
+function def(i) {
+  return FX_DESCRIPTOR.params[i]?.default ?? 0;
+}
+function flush(x) {
+  return x > -DENORMAL6 && x < DENORMAL6 ? 0 : x;
+}
+function sat(x) {
+  const c = x > 3 ? 3 : x < -3 ? -3 : x, c2 = c * c;
+  return c * (27 + c2) / (27 + 9 * c2);
+}
+function lfo(p) {
+  const t = p * 2 - 1;
+  return 4 * t * (t < 0 ? 1 + t : 1 - t);
+}
+function onePole(hz, sr) {
+  const c = 1 - Math.exp(-2 * Math.PI * hz / sr);
+  return c > 0.999 ? 0.999 : c < 1e-4 ? 1e-4 : c;
+}
+var Line = class {
+  buf;
+  mask;
+  w = 0;
+  constructor(maxSamples) {
+    let n = 4;
+    while (n < maxSamples + 4) n <<= 1;
+    this.buf = new Float32Array(n);
+    this.mask = n - 1;
+  }
+  write(x) {
+    this.buf[this.w] = x;
+    this.w = this.w + 1 & this.mask;
+  }
+  read(d) {
+    const lim = this.mask - 2, c = d < 1 ? 1 : d > lim ? lim : d, k = c | 0;
+    const a = this.buf[this.w - k & this.mask];
+    const b = this.buf[this.w - k - 1 & this.mask];
+    return a + (b - a) * (c - k);
+  }
+  clear() {
+    this.buf.fill(0);
+    this.w = 0;
+  }
+};
+var CH_MID_MS = 12;
+var CH_SPREAD_MS = 7;
+var CH_DEPTH_MS = 3.5;
+var CH_DRY_CUT = 0.4;
+var CH_WET_G = 0.55;
+var Chorus = class {
+  line;
+  phase = new Float32Array(3);
+  mid;
+  spread;
+  depth;
+  constructor(sr) {
+    this.line = new Line(Math.ceil(sr * 0.05));
+    this.mid = CH_MID_MS * sr / 1e3;
+    this.spread = CH_SPREAD_MS * sr / 1e3;
+    this.depth = CH_DEPTH_MS * sr / 1e3;
+    this.reset();
+  }
+  reset() {
+    this.line.clear();
+    this.phase[0] = 0;
+    this.phase[1] = 1 / 3;
+    this.phase[2] = 2 / 3;
+  }
+  process(x, p) {
+    const r = p[P_CH_RATE], d = p[P_CH_DEPTH] * this.depth;
+    const w = p[P_CH_WIDTH], m = p[P_CH_MIX];
+    let wet = 0;
+    for (let i = 0; i < 3; i++) {
+      let ph = this.phase[i] + r * (1 + (i - 1) * 0.28 * w);
+      if (ph >= 1) ph -= 1;
+      this.phase[i] = ph;
+      wet += this.line.read(this.mid + (i - 1) * this.spread * w + d * lfo(ph));
+    }
+    this.line.write(x);
+    return x * (1 - CH_DRY_CUT * m) + wet * (m * CH_WET_G);
+  }
+};
+var DL_MAX_S = 2.05;
+var DL_FB_MAX = 0.92;
+var Delay = class {
+  a;
+  b;
+  lpA = 0;
+  lpB = 0;
+  constructor(sr) {
+    this.a = new Line(Math.ceil(sr * DL_MAX_S));
+    this.b = new Line(Math.ceil(sr * DL_MAX_S));
+  }
+  reset() {
+    this.a.clear();
+    this.b.clear();
+    this.lpA = 0;
+    this.lpB = 0;
+  }
+  process(x, p) {
+    const t = p[P_DL_TIME], f = p[P_DL_FB];
+    const c = p[P_DL_TONE], w = p[P_DL_WIDTH];
+    const ra = this.a.read(t);
+    const rb = this.b.read(t * (1 - 0.5 * w));
+    this.lpA = flush(this.lpA + c * (ra - this.lpA));
+    this.lpB = flush(this.lpB + c * (rb - this.lpB));
+    this.a.write(flush(x + f * (w * this.lpB + (1 - w) * this.lpA)));
+    this.b.write(flush(f * (w * this.lpA + (1 - w) * this.lpB)));
+    return x + p[P_DL_MIX] * 0.7 * (ra + rb);
+  }
+};
+var FDN_N = 8;
+var AP_N = 4;
+var FDN_LEN = [1123, 1367, 1621, 1889, 2179, 2467, 2789, 3037];
+var AP_LEN = [67, 131, 229, 367];
+var AP_G = 0.55;
+var HAD = 0.3535533905932738;
+var RV_MAX_G = 0.94;
+var RV_MOD = 1.6;
+var RV_IN = 0.5;
+function hadamard8(v) {
+  for (let s = 1; s < FDN_N; s <<= 1) {
+    for (let i = 0; i < FDN_N; i += s << 1) {
+      for (let j = i; j < i + s; j++) {
+        const a = v[j], b = v[j + s];
+        v[j] = a + b;
+        v[j + s] = a - b;
+      }
+    }
+  }
+  for (let i = 0; i < FDN_N; i++) v[i] = v[i] * HAD;
+}
+var Reverb = class {
+  sr;
+  pre;
+  ap = [];
+  apLen = new Float32Array(AP_N);
+  line = [];
+  len = new Float32Array(FDN_N);
+  gain = new Float32Array(FDN_N);
+  lp = new Float32Array(FDN_N);
+  v = new Float32Array(FDN_N);
+  ph = new Float32Array(FDN_N);
+  inc = new Float32Array(FDN_N);
+  constructor(sr) {
+    this.sr = sr;
+    const k = sr / 48e3;
+    this.pre = new Line(Math.ceil(sr * 0.2));
+    for (let i = 0; i < AP_N; i++) {
+      const l = AP_LEN[i] * k;
+      this.apLen[i] = l;
+      this.ap.push(new Line(Math.ceil(l) + 4));
+    }
+    for (let i = 0; i < FDN_N; i++) {
+      const l = FDN_LEN[i] * k;
+      this.len[i] = l;
+      this.inc[i] = (0.31 + i * 0.07) / sr;
+      this.line.push(new Line(Math.ceil(l) + 8));
+    }
+    this.setDecay(def(P_RV_SIZE), def(P_RV_DECAY));
+    this.reset();
+  }
+  /** Per-line gain for a -60 dB tail. A step in feedback gain changes the decay
+   *  rate, not the waveform, so unlike everything else it needs no smoothing. */
+  setDecay(size, decayMs) {
+    const dec = decayMs / 1e3 * this.sr;
+    for (let i = 0; i < FDN_N; i++) {
+      const g = Math.pow(10, -3 * this.len[i] * size / dec);
+      this.gain[i] = g > RV_MAX_G ? RV_MAX_G : g;
+    }
+  }
+  reset() {
+    this.pre.clear();
+    for (let i = 0; i < AP_N; i++) this.ap[i].clear();
+    for (let i = 0; i < FDN_N; i++) {
+      this.line[i].clear();
+      this.ph[i] = i / FDN_N;
+    }
+    this.lp.fill(0);
+    this.v.fill(0);
+  }
+  process(x, p) {
+    const s = p[P_RV_SIZE], dp = p[P_RV_DAMP];
+    let d = this.pre.read(p[P_RV_PREDELAY]);
+    this.pre.write(x);
+    for (let i = 0; i < AP_N; i++) {
+      const ln = this.ap[i];
+      const bo = ln.read(this.apLen[i]), vv = flush(d + AP_G * bo);
+      ln.write(vv);
+      d = bo - AP_G * vv;
+    }
+    let wet = 0;
+    for (let i = 0; i < FDN_N; i++) {
+      let ph = this.ph[i] + this.inc[i];
+      if (ph >= 1) ph -= 1;
+      this.ph[i] = ph;
+      const r = this.line[i].read(this.len[i] * s + RV_MOD * lfo(ph));
+      wet += r;
+      const l = flush(this.lp[i] + dp * (r - this.lp[i]));
+      this.lp[i] = l;
+      this.v[i] = l * this.gain[i];
+    }
+    hadamard8(this.v);
+    const inj = d * RV_IN;
+    for (let i = 0; i < FDN_N; i++) this.line[i].write(flush(inj + this.v[i]));
+    return x + p[P_RV_MIX] * wet * HAD;
+  }
+};
+var DRIVE_REF = 0.35;
+var DRIVE_MAX_G = 24;
+var TILT_HZ = 900;
+var TILT_AMOUNT = 0.9;
+var LIMIT = 1.5;
+var FxChain = class {
+  sm = [];
+  target = new Float32Array(N_PARAMS);
+  /** Smoothed, in DSP units — the only path into the DSP, so an un-smoothed
+   *  parameter is structurally impossible. */
+  v = new Float32Array(N_PARAMS);
+  chorus;
+  delay;
+  reverb;
+  sr;
+  tiltC;
+  sizeRaw = def(P_RV_SIZE);
+  decayRaw = def(P_RV_DECAY);
+  tilt = 0;
+  held = 0;
+  acc = 0;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    for (let i = 0; i < N_PARAMS; i++) this.sm.push(new Smoother(sampleRate2, SMOOTH_MS[i] ?? 25));
+    this.chorus = new Chorus(sampleRate2);
+    this.delay = new Delay(sampleRate2);
+    this.reverb = new Reverb(sampleRate2);
+    this.tiltC = onePole(TILT_HZ, sampleRate2);
+    for (let i = 0; i < N_PARAMS; i++) this.setParam(i, def(i));
+    this.reset();
+  }
+  /** Descriptor units in, DSP units out. Runs per knob move, never per sample:
+   *  every exp and pow in this effect lives here. */
+  toDsp(i, v) {
+    if (i === P_DRIVE2) return v < 0 ? 0 : v > 1 ? 1 : v;
+    if (i === P_DRIVE_TONE) return (v * 2 - 1) * TILT_AMOUNT;
+    if (i === P_CRUSH_RATE) return 1 / (1 + v * 63);
+    if (i === P_CRUSH_BITS) return Math.pow(2, v - 1);
+    if (i === P_CH_RATE) return v / this.sr;
+    if (i === P_DL_TIME || i === P_RV_PREDELAY) return v * this.sr / 1e3;
+    if (i === P_DL_FB) return v * DL_FB_MAX;
+    if (i === P_DL_TONE) return onePole(v, this.sr);
+    if (i === P_RV_DAMP) return 1 - 0.985 * v * v;
+    if (i === P_TRIM) return Math.pow(10, v / 20);
+    return v;
+  }
+  setParam(index, value) {
+    if (index < 0 || index >= N_PARAMS) return;
+    const dsp = this.toDsp(index, value);
+    this.target[index] = dsp;
+    this.sm[index].setTarget(dsp);
+    if (index === P_RV_SIZE) this.sizeRaw = value;
+    else if (index === P_RV_DECAY) this.decayRaw = value;
+    else return;
+    this.reverb.setDecay(this.sizeRaw, this.decayRaw);
+  }
+  /** Clears every buffer and snaps all smoothers. For audio start or a patch
+   *  swap; never mid-note, that is what the smoothing is for. */
+  reset() {
+    this.tilt = 0;
+    this.held = 0;
+    this.acc = 0;
+    for (let i = 0; i < N_PARAMS; i++) {
+      const t = this.target[i];
+      this.sm[i].snap(t);
+      this.v[i] = t;
+    }
+    this.chorus.reset();
+    this.delay.reset();
+    this.reverb.reset();
+  }
+  process(buffer, count) {
+    const v = this.v, sm = this.sm;
+    for (let n = 0; n < count; n++) {
+      for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
+      const dry = buffer[n];
+      let x = dry;
+      const amt = v[P_DRIVE2];
+      this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
+      if (amt > 0) {
+        const g = 1 + amt * DRIVE_MAX_G;
+        const shaped = x + v[P_DRIVE_TONE] * (x - this.tilt);
+        const w = sat(shaped * g) * DRIVE_REF / sat(DRIVE_REF * g);
+        x = dry + (w - dry) * (amt * (2 - amt));
+      }
+      this.acc += v[P_CRUSH_RATE];
+      if (this.acc >= 1) {
+        this.acc -= 1;
+        this.held = x;
+      }
+      const half = v[P_CRUSH_BITS];
+      x = Math.floor(this.held * half + 0.5) / half;
+      x = this.chorus.process(x, v);
+      x = this.delay.process(x, v);
+      x = this.reverb.process(x, v);
+      x = sat(x * v[P_TRIM] / LIMIT) * LIMIT;
+      buffer[n] = x === x ? x : 0;
+    }
+  }
+};
+
+// src/dsp/fx-magic-descriptor.ts
+var DENORMAL7 = 1e-20;
+var TWO_PI5 = Math.PI * 2;
+function flush2(x) {
+  return x < DENORMAL7 && x > -DENORMAL7 ? 0 : x;
+}
+function saturate4(x) {
+  const x2 = x * x;
+  return x * (27 + x2) / (27 + 9 * x2);
+}
+function softLimit2(x, knee, span) {
+  const a = x < 0 ? -x : x;
+  if (a <= knee) return x;
+  const over = a - knee;
+  const lim = over >= span ? knee + span * 0.5 : knee + over * (1 - over / (span + span));
+  return x < 0 ? -lim : lim;
+}
+function copyTail(ring, w, dst, n) {
+  const max = ring.length;
+  let r = w - n;
+  while (r < 0) r += max;
+  for (let i = 0; i < n; i++) {
+    dst[i] = ring[r];
+    r++;
+    if (r >= max) r = 0;
+  }
+}
+var DelayLine = class {
+  buf;
+  mask;
+  w = 0;
+  constructor(maxSamples) {
+    let size = 8;
+    while (size < maxSamples + 4) size <<= 1;
+    this.buf = new Float32Array(size);
+    this.mask = size - 1;
+  }
+  reset() {
+    this.buf.fill(0);
+    this.w = 0;
+  }
+  write(x) {
+    this.buf[this.w] = x;
+    this.w = this.w + 1 & this.mask;
+  }
+  /** `d` samples into the past, linearly interpolated. */
+  read(d) {
+    const pos = this.w - 1 - d;
+    const i0 = Math.floor(pos);
+    const f = pos - i0;
+    const a = this.buf[i0 & this.mask];
+    const b = this.buf[i0 + 1 & this.mask];
+    return a + (b - a) * f;
+  }
+};
+var Allpass2 = class {
+  x1 = 0;
+  x2 = 0;
+  y1 = 0;
+  y2 = 0;
+  a;
+  constructor(coeff) {
+    this.a = coeff * coeff;
+  }
+  reset() {
+    this.x1 = 0;
+    this.x2 = 0;
+    this.y1 = 0;
+    this.y2 = 0;
+  }
+  process(x) {
+    const y = this.a * (x + this.y2) - this.x2;
+    this.x2 = this.x1;
+    this.x1 = x;
+    this.y2 = this.y1;
+    this.y1 = flush2(y);
+    return this.y1;
+  }
+};
+var HILBERT_I = [0.6923877778065, 0.9360654322959, 0.988229522686, 0.9987488452737];
+var HILBERT_Q = [0.4021921162426, 0.856171088242, 0.9722909545651, 0.9952884791278];
+var HilbertPair = class {
+  ci = [];
+  cq = [];
+  z = 0;
+  i = 0;
+  q = 0;
+  constructor() {
+    for (let k = 0; k < 4; k++) {
+      this.ci.push(new Allpass2(HILBERT_I[k]));
+      this.cq.push(new Allpass2(HILBERT_Q[k]));
+    }
+  }
+  reset() {
+    for (let k = 0; k < 4; k++) {
+      this.ci[k].reset();
+      this.cq[k].reset();
+    }
+    this.z = 0;
+    this.i = 0;
+    this.q = 0;
+  }
+  process(x) {
+    let a = x;
+    let b = x;
+    for (let k = 0; k < 4; k++) {
+      a = this.ci[k].process(a);
+      b = this.cq[k].process(b);
+    }
+    this.i = this.z;
+    this.z = a;
+    this.q = b;
+  }
+};
+var PitchShifter = class {
+  line;
+  win;
+  phase = 0;
+  constructor(sampleRate2, windowMs) {
+    this.win = Math.round(windowMs / 1e3 * sampleRate2);
+    this.line = new DelayLine(this.win * 2 + 8);
+  }
+  reset() {
+    this.line.reset();
+    this.phase = 0;
+  }
+  process(x, ratio) {
+    this.line.write(x);
+    const w = this.win;
+    let p = this.phase + (1 - ratio);
+    if (p < 0) p += w;
+    else if (p >= w) p -= w;
+    this.phase = p;
+    const q = p < w * 0.5 ? p + w * 0.5 : p - w * 0.5;
+    const g = 0.5 - 0.5 * Math.cos(TWO_PI5 * p / w);
+    return g * this.line.read(p) + (1 - g) * this.line.read(q);
+  }
+};
+var Diffuser = class {
+  buf;
+  len;
+  idx = 0;
+  g;
+  constructor(lengthSamples, g) {
+    this.len = Math.max(2, Math.round(lengthSamples));
+    this.buf = new Float32Array(this.len);
+    this.g = g;
+  }
+  reset() {
+    this.buf.fill(0);
+    this.idx = 0;
+  }
+  process(x) {
+    const d = this.buf[this.idx];
+    const y = d - this.g * x;
+    this.buf[this.idx] = flush2(x + this.g * y);
+    this.idx++;
+    if (this.idx >= this.len) this.idx = 0;
+    return y;
+  }
+};
+var FORMANT_HZ = [730, 1090, 2440, 530, 1840, 2480, 270, 2290, 3010, 570, 840, 2410, 300, 870, 2240];
+var FORMANT_LOG = new Float32Array(FORMANT_HZ.length);
+for (let i = 0; i < FORMANT_HZ.length; i++) FORMANT_LOG[i] = Math.log(FORMANT_HZ[i]);
+var MAGIC_PARAM = {
+  freezeCapture: 0,
+  freezeLength: 1,
+  freezeMix: 2,
+  shimmerMix: 3,
+  shimmerPitch: 4,
+  shimmerFeedback: 5,
+  shimmerSize: 6,
+  shimmerDamp: 7,
+  shiftHz: 8,
+  shiftMix: 9,
+  shiftRing: 10,
+  vowelPos: 11,
+  vowelMix: 12,
+  vowelSharp: 13,
+  stutterMix: 14,
+  stutterChance: 15,
+  stutterSlice: 16,
+  stutterPitch: 17,
+  stutterSeed: 18,
+  tapeWear: 19,
+  tapeWow: 20,
+  tapeFlutter: 21
+};
+var FX_MAGIC_DESCRIPTOR = {
+  id: "fx-magic",
+  name: "Magic",
+  colour: "#7DF9FF",
+  macroNames: ["Suspend", "Bloom", "Alien", "Wear"],
+  params: [
+    {
+      id: "freeze-capture",
+      name: "Capture",
+      group: "Freeze",
+      unit: "none",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "stepped",
+      steps: 2,
+      mutability: 0.1,
+      explain: "The trigger. Turn it on and the last slice of sound is caught and looped forever, so a chord you played half a second ago hangs in the air while you keep playing over the top of it. Turn it off and the held sound fades away."
+    },
+    {
+      id: "freeze-length",
+      name: "Hold Length",
+      group: "Freeze",
+      unit: "ms",
+      min: 40,
+      max: 2e3,
+      default: 500,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How much of the recent past gets caught when you capture. Short lengths turn a note into a buzzing drone with a pitch of its own; long lengths hold a whole phrase suspended and still recognisable."
+    },
+    {
+      id: "freeze-mix",
+      name: "Suspend",
+      group: "Freeze",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      macro: 0,
+      macroDepth: 0.9,
+      mutability: 0.7,
+      explain: "How loud the frozen layer sits under what you are playing now. Raising it pulls the held sound forward and steps the live signal back, so one hand can play against a chord that nobody is holding down any more."
+    },
+    {
+      id: "shimmer-mix",
+      name: "Shimmer",
+      group: "Shimmer",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.2,
+      curve: "linear",
+      macro: 1,
+      macroDepth: 0.8,
+      mutability: 0.9,
+      explain: "Blends in a reverb tail that climbs in pitch as it decays. This is a note blooming upward into a cathedral instead of simply fading out, and it is the fastest way to make a small sound feel enormous."
+    },
+    {
+      id: "shimmer-pitch",
+      name: "Bloom Interval",
+      group: "Shimmer",
+      unit: "semitones",
+      min: 0,
+      max: 12,
+      default: 12,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "How far the tail is transposed each time round the loop. 12 is the classic octave halo; 7 gives a fifth that stacks into a chord; small values detune the tail into a shivering cloud rather than climbing."
+    },
+    {
+      id: "shimmer-feedback",
+      name: "Regeneration",
+      group: "Shimmer",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.6,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "How much of the tail is fed back to be transposed again, stacking octave on octave into a rising choir. It is clamped below unity on purpose, so however far you push it the tail always decays in the end."
+    },
+    {
+      id: "shimmer-size",
+      name: "Size",
+      group: "Shimmer",
+      unit: "ms",
+      min: 20,
+      max: 500,
+      default: 180,
+      curve: "exp",
+      mutability: 0.7,
+      explain: "The length of the space the tail circulates in. Small sizes ring like a bright metal room; large sizes space the rising octaves far enough apart that you hear each one arrive separately."
+    },
+    {
+      id: "shimmer-damp",
+      name: "Damping",
+      group: "Shimmer",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.4,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Takes a little more top off the tail on every pass, the way air and soft furnishings absorb high frequencies in a real room. Without it a shimmer climbs until there is nothing left but hiss."
+    },
+    {
+      id: "shift-hz",
+      name: "Shift",
+      group: "Frequency Shifter",
+      unit: "hz",
+      min: -1e3,
+      max: 1e3,
+      default: 0,
+      curve: "linear",
+      mutability: 0.9,
+      explain: "Moves every frequency by the same number of Hz rather than the same musical interval, so harmonics stop being whole-number multiples of the note. A few Hz gives eerie slow beating; hundreds turn anything into struck metal with no pitch left at all."
+    },
+    {
+      id: "shift-mix",
+      name: "Alien",
+      group: "Frequency Shifter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.8,
+      mutability: 0.9,
+      explain: "How much of the shifted signal replaces the original. Halfway leaves the real pitch audible underneath, which is what makes the clang sound like it belongs to the note rather than to a separate machine in the room."
+    },
+    {
+      id: "shift-ring",
+      name: "Ring",
+      group: "Frequency Shifter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Morphs from true single-sideband shifting toward plain ring modulation, which produces the sum and the difference at once. Ring is harsher and more symmetrical; shifting is stranger and more liquid."
+    },
+    {
+      id: "vowel-pos",
+      name: "Vowel",
+      group: "Formant",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.9,
+      explain: "Sweeps three resonances through the shapes a human mouth makes, A to E to I to O to U. Everywhere in between is a mouth position nobody can hold, which is where it stops sounding like a filter and starts sounding like a voice."
+    },
+    {
+      id: "vowel-mix",
+      name: "Speak",
+      group: "Formant",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.9,
+      explain: "How much of the vowel filtering replaces the plain sound. A little makes the tone nasal and vocal; full makes the synth talk, with whatever you are playing acting as the vocal cords."
+    },
+    {
+      id: "vowel-sharp",
+      name: "Sharpness",
+      group: "Formant",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.6,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "How narrow the three resonances are. Wide is a soft breathy vowel; narrow is a tight shouted one that rings on for a moment after the note itself has stopped."
+    },
+    {
+      id: "stutter-mix",
+      name: "Stutter",
+      group: "Stutter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "How completely a repeat takes over from the live signal while it runs. Partial amounts leave the real performance audible underneath the glitch, which reads as an effect rather than as a mistake."
+    },
+    {
+      id: "stutter-chance",
+      name: "Chance",
+      group: "Stutter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.35,
+      curve: "linear",
+      mutability: 0.9,
+      explain: "The probability that any given slice gets caught and repeated. Low values falter now and then like a machine with a fault; at maximum every slice repeats and the glitch becomes the rhythm."
+    },
+    {
+      id: "stutter-slice",
+      name: "Slice",
+      group: "Stutter",
+      unit: "ms",
+      min: 20,
+      max: 500,
+      default: 120,
+      curve: "exp",
+      mutability: 0.8,
+      explain: "The length of the chunk that gets repeated. Long slices sound like a beat repeat you could dance to; under about 50 ms the repetition happens fast enough to fuse into a pitch of its own."
+    },
+    {
+      id: "stutter-pitch",
+      name: "Repeat Pitch",
+      group: "Stutter",
+      unit: "semitones",
+      min: -12,
+      max: 12,
+      default: 0,
+      curve: "linear",
+      mutability: 0.8,
+      explain: "Transposes each repeat relative to the one before, so a stutter falls into a hole or climbs away from you instead of sitting still. Zero is the straight mechanical repeat."
+    },
+    {
+      id: "stutter-seed",
+      name: "Seed",
+      group: "Stutter",
+      unit: "none",
+      min: 1,
+      max: 9999,
+      default: 1337,
+      curve: "stepped",
+      steps: 9999,
+      mutability: 0.4,
+      explain: "Chooses which random sequence the stutter follows. The randomness is genuine but repeatable, so the same seed always glitches in exactly the same places and a take you liked can be played again."
+    },
+    {
+      id: "tape-wear",
+      name: "Wear",
+      group: "Tape",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.15,
+      curve: "linear",
+      macro: 3,
+      macroDepth: 0.8,
+      mutability: 0.9,
+      explain: "Drives the signal into tape saturation and progressively loses the top end, the way a reel that has been round the machine too many times does. This is the cheapest way to stop digital sound feeling weightless."
+    },
+    {
+      id: "tape-wow",
+      name: "Wow",
+      group: "Tape",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.25,
+      curve: "linear",
+      mutability: 0.9,
+      explain: "Slow pitch drift, about once a second, from a reel that is not perfectly round. A little makes sustained notes breathe instead of standing dead still; a lot sounds seasick and broken."
+    },
+    {
+      id: "tape-flutter",
+      name: "Flutter",
+      group: "Tape",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.25,
+      curve: "linear",
+      mutability: 0.9,
+      explain: 'Fast pitch wobble from the capstan and the guide rollers. Too quick to hear as pitch, so instead it adds a grainy unsteady texture that the ear reads as "recorded on something physical".'
+    }
+  ]
+};
+var Tape = class {
+  line;
+  sr;
+  base;
+  wowPh = 0;
+  fl1 = 0;
+  fl2 = 0;
+  lp = 0;
+  constructor(sr) {
+    this.sr = sr;
+    this.base = sr * 6e-3;
+    this.line = new DelayLine(Math.round(sr * 0.02));
+  }
+  reset() {
+    this.line.reset();
+    this.wowPh = 0;
+    this.fl1 = 0;
+    this.fl2 = 0;
+    this.lp = 0;
+  }
+  process(x, wear, wow, flutter) {
+    this.wowPh += TWO_PI5 * 0.73 / this.sr;
+    if (this.wowPh > TWO_PI5) this.wowPh -= TWO_PI5;
+    this.fl1 += TWO_PI5 * 7.3 / this.sr;
+    if (this.fl1 > TWO_PI5) this.fl1 -= TWO_PI5;
+    this.fl2 += TWO_PI5 * 11.9 / this.sr;
+    if (this.fl2 > TWO_PI5) this.fl2 -= TWO_PI5;
+    const mod = this.sr * (wow * 28e-4 * Math.sin(this.wowPh) + flutter * 35e-5 * (Math.sin(this.fl1) * 0.7 + Math.sin(this.fl2) * 0.3));
+    this.line.write(x);
+    const d = this.line.read(this.base + mod);
+    const hot = saturate4(d * (1 + wear * 5)) / (1 + wear * 1.6);
+    const y = d + (hot - d) * wear;
+    let c = TWO_PI5 * (18e3 - 15200 * wear) / this.sr;
+    if (c > 0.99) c = 0.99;
+    this.lp = flush2(this.lp + c * (y - this.lp));
+    return this.lp;
+  }
+};
+function blend(dry, wet, m) {
+  return dry + (wet - dry) * m;
+}
+var FreqShifter = class {
+  hil = new HilbertPair();
+  sr;
+  phase = 0;
+  constructor(sr) {
+    this.sr = sr;
+  }
+  reset() {
+    this.hil.reset();
+    this.phase = 0;
+  }
+  process(x, hz, ring) {
+    this.hil.process(x);
+    let ph = this.phase + TWO_PI5 * hz / this.sr;
+    if (ph > Math.PI) ph -= TWO_PI5;
+    else if (ph < -Math.PI) ph += TWO_PI5;
+    this.phase = ph;
+    const c = Math.cos(ph), s = Math.sin(ph);
+    return blend(this.hil.i * c + this.hil.q * s, x * c, ring);
+  }
+};
+
+// src/dsp/fx-magic.ts
+var Freezer = class {
+  ring;
+  loop;
+  max;
+  gain;
+  w = 0;
+  len = 0;
+  xf = 1;
+  p = 0;
+  held = false;
+  constructor(sr) {
+    this.max = Math.round(sr * 2);
+    this.ring = new Float32Array(this.max);
+    this.loop = new Float32Array(this.max);
+    this.gain = new Smoother(sr, 15);
+  }
+  release() {
+    this.held = false;
+  }
+  reset() {
+    this.ring.fill(0);
+    this.loop.fill(0);
+    this.gain.snap(0);
+    this.w = 0;
+    this.len = 0;
+    this.p = 0;
+    this.held = false;
+  }
+  capture(lenSamples) {
+    const L = Math.max(128, Math.min(this.max, Math.round(lenSamples)));
+    copyTail(this.ring, this.w, this.loop, L);
+    this.xf = Math.max(1, Math.floor(L * 0.25));
+    this.len = L - this.xf;
+    this.p = 0;
+    this.held = true;
+  }
+  process(x) {
+    this.ring[this.w] = x;
+    this.w++;
+    if (this.w >= this.max) this.w = 0;
+    this.gain.setTarget(this.held ? 1 : 0);
+    const g = this.gain.next();
+    if (g === 0 || this.len <= 0) return 0;
+    const p = this.p;
+    let y = this.loop[p];
+    if (p < this.xf) {
+      const t = 0.5 - 0.5 * Math.cos(Math.PI * p / this.xf);
+      y = y * t + this.loop[p + this.len] * (1 - t);
+    }
+    this.p = p + 1 >= this.len ? 0 : p + 1;
+    return y * g;
+  }
+};
+var Shimmer = class {
+  line;
+  shifter;
+  d1;
+  d2;
+  z = 0;
+  constructor(sr) {
+    this.line = new DelayLine(Math.round(sr * 0.55));
+    this.shifter = new PitchShifter(sr, 60);
+    this.d1 = new Diffuser(sr * 723e-5, 0.62);
+    this.d2 = new Diffuser(sr * 0.01043, 0.55);
+  }
+  reset() {
+    this.line.reset();
+    this.shifter.reset();
+    this.d1.reset();
+    this.d2.reset();
+    this.z = 0;
+  }
+  process(x, delay, fb, ratio, damp) {
+    const tail = this.line.read(delay);
+    this.z = flush2(this.z + (1 - damp * 0.92) * (tail - this.z));
+    let w = this.d2.process(this.d1.process(x + saturate4(this.shifter.process(this.z, ratio) * fb)));
+    if (w > 4) w = 4;
+    else if (w < -4) w = -4;
+    this.line.write(flush2(w));
+    return tail;
+  }
+};
+var VowelFilter = class {
+  f = [];
+  lastPos = -1;
+  lastSharp = -1;
+  constructor(sr) {
+    for (let k = 0; k < 3; k++) {
+      const s = new StateVariableFilter(sr);
+      s.setMode("bp");
+      this.f.push(s);
+    }
+  }
+  reset() {
+    for (let k = 0; k < 3; k++) this.f[k].reset();
+    this.lastPos = -1;
+    this.lastSharp = -1;
+  }
+  process(x, pos, sharp) {
+    if (Math.abs(pos - this.lastPos) > 2e-3 || Math.abs(sharp - this.lastSharp) > 5e-3) {
+      this.lastPos = pos;
+      this.lastSharp = sharp;
+      const t = (pos < 0 ? 0 : pos > 1 ? 1 : pos) * 4;
+      let i = Math.floor(t);
+      if (i > 3) i = 3;
+      const frac = t - i;
+      const a = i * 3;
+      for (let k = 0; k < 3; k++) {
+        const lo = FORMANT_LOG[a + k];
+        const hi = FORMANT_LOG[a + 3 + k];
+        const flt = this.f[k];
+        flt.setCutoff(Math.exp(lo + (hi - lo) * frac));
+        flt.setResonance(0.55 + 0.42 * sharp);
+      }
+    }
+    const b0 = this.f[0].process(x);
+    const b1 = this.f[1].process(x);
+    const b2 = this.f[2].process(x);
+    return (b0 + b1 * 0.55 + b2 * 0.3) * 0.45;
+  }
+};
+var Stutter = class {
+  ring;
+  slice;
+  max;
+  fade;
+  w = 0;
+  counter = 0;
+  active = false;
+  phase = 0;
+  rate = 1;
+  repeats = 0;
+  len = 0;
+  s = 1337 >>> 0;
+  constructor(sr) {
+    this.max = Math.round(sr * 0.5);
+    this.ring = new Float32Array(this.max);
+    this.slice = new Float32Array(this.max);
+    this.fade = Math.max(4, Math.round(sr * 2e-3));
+  }
+  setSeed(seed) {
+    this.s = Math.round(seed) >>> 0 || 1;
+    this.active = false;
+    this.counter = 0;
+  }
+  reset() {
+    this.ring.fill(0);
+    this.slice.fill(0);
+    this.w = 0;
+    this.counter = 0;
+    this.active = false;
+    this.phase = 0;
+    this.rate = 1;
+  }
+  /** mulberry32: small, fast, seeded, identical every run. */
+  rand() {
+    this.s = this.s + 1831565813 >>> 0;
+    let t = this.s;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+  latch(n) {
+    const L = Math.max(32, Math.min(this.max, Math.round(n)));
+    copyTail(this.ring, this.w, this.slice, L);
+    this.len = L;
+    this.phase = 0;
+    this.rate = 1;
+    this.repeats = 2 + Math.floor(this.rand() * 4);
+    this.active = true;
+  }
+  process(x, sliceSamples, chance, pitchRatio) {
+    this.ring[this.w] = x;
+    this.w++;
+    if (this.w >= this.max) this.w = 0;
+    if (!this.active) {
+      this.counter++;
+      if (this.counter >= sliceSamples) {
+        this.counter = 0;
+        if (this.rand() < chance) this.latch(sliceSamples);
+      }
+      if (!this.active) return x;
+    }
+    const n = this.len;
+    let ph = this.phase;
+    const i0 = Math.floor(ph);
+    const a = this.slice[i0 % n];
+    const b = this.slice[(i0 + 1) % n];
+    let y = a + (b - a) * (ph - i0);
+    const fd = this.fade;
+    if (ph < fd) y *= ph / fd;
+    else if (ph > n - fd) y *= (n - ph) / fd;
+    ph += this.rate;
+    if (ph >= n) {
+      ph -= n;
+      this.repeats--;
+      this.rate *= pitchRatio;
+      if (this.rate < 0.25) this.rate = 0.25;
+      else if (this.rate > 4) this.rate = 4;
+      if (this.repeats <= 0) {
+        this.active = false;
+        this.counter = 0;
+      }
+    }
+    this.phase = ph;
+    return y;
+  }
+};
+var MagicChain = class {
+  sr;
+  sm = [];
+  val;
+  freezer;
+  shimmer;
+  shifter;
+  vowel;
+  stutter;
+  tape;
+  held = false;
+  wantCapture = false;
+  wantRelease = false;
+  freezeLenMs;
+  constructor(sampleRate2) {
+    this.sr = sampleRate2;
+    const params = FX_MAGIC_DESCRIPTOR.params;
+    this.val = new Float32Array(params.length);
+    for (let i = 0; i < params.length; i++) {
+      const d = params[i];
+      const s = new Smoother(sampleRate2, 20);
+      s.snap(d ? d.default : 0);
+      this.sm.push(s);
+      this.val[i] = d ? d.default : 0;
+    }
+    this.freezeLenMs = this.val[MAGIC_PARAM.freezeLength];
+    this.freezer = new Freezer(sampleRate2);
+    this.shimmer = new Shimmer(sampleRate2);
+    this.shifter = new FreqShifter(sampleRate2);
+    this.vowel = new VowelFilter(sampleRate2);
+    this.stutter = new Stutter(sampleRate2);
+    this.tape = new Tape(sampleRate2);
+  }
+  setParam(index, value) {
+    const d = FX_MAGIC_DESCRIPTOR.params[index];
+    if (!d) return;
+    const v = value < d.min ? d.min : value > d.max ? d.max : value;
+    if (index === MAGIC_PARAM.freezeCapture) {
+      const on = v >= 0.5;
+      if (on && !this.held) this.wantCapture = true;
+      else if (!on && this.held) this.wantRelease = true;
+      this.held = on;
+      return;
+    }
+    if (index === MAGIC_PARAM.stutterSeed) {
+      this.stutter.setSeed(v);
+      return;
+    }
+    if (index === MAGIC_PARAM.freezeLength) this.freezeLenMs = v;
+    this.sm[index].setTarget(v);
+  }
+  reset() {
+    this.freezer.reset();
+    this.shimmer.reset();
+    this.shifter.reset();
+    this.vowel.reset();
+    this.stutter.reset();
+    this.tape.reset();
+    this.held = false;
+    this.wantCapture = false;
+    this.wantRelease = false;
+  }
+  process(buffer, count) {
+    if (this.wantCapture) {
+      this.freezer.capture(this.freezeLenMs / 1e3 * this.sr);
+      this.wantCapture = false;
+    }
+    if (this.wantRelease) {
+      this.freezer.release();
+      this.wantRelease = false;
+    }
+    const v = this.val;
+    const np = v.length;
+    const sr = this.sr;
+    for (let i = 0; i < count; i++) {
+      for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
+      let x = buffer[i];
+      x = blend(
+        x,
+        this.vowel.process(x, v[MAGIC_PARAM.vowelPos], v[MAGIC_PARAM.vowelSharp]),
+        v[MAGIC_PARAM.vowelMix]
+      );
+      x = blend(
+        x,
+        this.shifter.process(x, v[MAGIC_PARAM.shiftHz], v[MAGIC_PARAM.shiftRing]),
+        v[MAGIC_PARAM.shiftMix]
+      );
+      x = blend(
+        x,
+        this.stutter.process(
+          x,
+          v[MAGIC_PARAM.stutterSlice] / 1e3 * sr,
+          v[MAGIC_PARAM.stutterChance],
+          2 ** (v[MAGIC_PARAM.stutterPitch] / 12)
+        ),
+        v[MAGIC_PARAM.stutterMix]
+      );
+      x = blend(x, this.shimmer.process(
+        x,
+        v[MAGIC_PARAM.shimmerSize] / 1e3 * sr,
+        v[MAGIC_PARAM.shimmerFeedback] * 0.85,
+        2 ** (v[MAGIC_PARAM.shimmerPitch] / 12),
+        v[MAGIC_PARAM.shimmerDamp]
+      ), v[MAGIC_PARAM.shimmerMix]);
+      const fm = v[MAGIC_PARAM.freezeMix];
+      x = x * (1 - 0.5 * fm) + this.freezer.process(x) * fm;
+      x = this.tape.process(
+        x,
+        v[MAGIC_PARAM.tapeWear],
+        v[MAGIC_PARAM.tapeWow],
+        v[MAGIC_PARAM.tapeFlutter]
+      );
+      if (!(x > -1e9 && x < 1e9)) {
+        this.reset();
+        x = 0;
+      }
+      const y = softLimit2(x, 0.9, 0.6);
+      buffer[i] = y > 1.2 ? 1.2 : y < -1.2 ? -1.2 : y;
+    }
+  }
+};
+
 // src/audio/worklet/sigil-processor.ts
 var SigilProcessor = class extends AudioWorkletProcessor {
   managers = /* @__PURE__ */ new Map();
   active;
+  fx;
+  magic;
   constructor(options) {
     super(options);
+    this.fx = new FxChain(sampleRate);
+    this.magic = new MagicChain(sampleRate);
     for (const engine of ENGINES) {
       this.managers.set(engine.descriptor.id, new VoiceManager(engine, sampleRate, 16));
     }
@@ -2680,8 +4138,11 @@ var SigilProcessor = class extends AudioWorkletProcessor {
           this.active.noteOff(msg.note);
           break;
         case "params":
-          forEachParam(msg.data, (i, v) => {
-            this.active.setParam(i, v);
+          forEachParam(msg.data, (address, v) => {
+            const { section, index } = sectionOf(address);
+            if (section === "fx") this.fx.setParam(index, v);
+            else if (section === "magic") this.magic.setParam(index, v);
+            else this.active.setParam(index, v);
           });
           break;
         case "setEngine": {
@@ -2714,6 +4175,8 @@ var SigilProcessor = class extends AudioWorkletProcessor {
     if (!left) return true;
     left.fill(0);
     this.active.render(left, left.length);
+    this.fx.process(left, left.length);
+    this.magic.process(left, left.length);
     if (this.releaseAtSample >= 0 && this.bounceNotes.length > 0) {
       this.samplesRendered += left.length;
       if (this.samplesRendered >= this.releaseAtSample) {

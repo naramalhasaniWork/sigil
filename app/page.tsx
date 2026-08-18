@@ -10,7 +10,7 @@ import { SigilWordmark } from '@/ui/components/engine-mark';
 import { Transport } from '@/ui/components/transport';
 import { MacroRow } from '@/ui/components/macro-row';
 import { XYPad } from '@/ui/components/xy-pad';
-import { ParamRow } from '@/ui/components/param-row';
+import { ParamGroups } from '@/ui/components/param-groups';
 import { HuntGrid } from '@/ui/components/hunt-grid';
 import { PadGrid } from '@/ui/components/pad-grid';
 import { Keys } from '@/ui/components/keys';
@@ -18,7 +18,7 @@ import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
 
-type View = 'sculpt' | 'deep' | 'hunt';
+type View = 'sculpt' | 'deep' | 'fx' | 'hunt';
 
 export default function Page(): JSX.Element {
   const inst = useInstrument();
@@ -31,7 +31,7 @@ export default function Page(): JSX.Element {
     onNoteOn: inst.noteOn,
     onNoteOff: inst.noteOff,
     octave,
-    enabled: inst.started && inst.layout === 'keys',
+    enabled: inst.started,
   });
 
   const midi = useMidi({
@@ -48,14 +48,6 @@ export default function Page(): JSX.Element {
     })),
     [],
   );
-
-  const groups = useMemo(() => {
-    const seen: string[] = [];
-    for (const p of inst.descriptor?.params ?? []) {
-      if (!seen.includes(p.group)) seen.push(p.group);
-    }
-    return seen;
-  }, [inst.descriptor]);
 
   const onXY = useCallback((x: number, y: number): void => {
     inst.setMacro(1, x);
@@ -117,7 +109,7 @@ export default function Page(): JSX.Element {
 
         <section className="flex-1 min-w-0 flex flex-col">
           <div className="flex border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
-            {(['sculpt', 'deep', 'hunt'] as const).map((v) => (
+            {(['sculpt', 'deep', 'fx', 'hunt'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -168,30 +160,34 @@ export default function Page(): JSX.Element {
             )}
 
             {view === 'deep' && inst.descriptor && inst.values && (
-              <div className="max-w-3xl">
-                {groups.map((group) => (
-                  <div key={group} className="mb-6">
-                    <div className="label border-b-[3px] pb-1.5 mb-2" style={{ borderColor: 'var(--muted)' }}>
-                      {group}
-                    </div>
-                    {inst.descriptor?.params.map((p, i) => (
-                      p.group === group ? (
-                        <ParamRow
-                          key={p.id}
-                          name={p.name}
-                          value={inst.values?.[i] ?? p.default}
-                          min={p.min}
-                          max={p.max}
-                          unit={p.unit}
-                          curve={p.curve}
-                          explain={p.explain}
-                          colour={colour}
-                          onChange={(v): void => inst.setParam(i, v)}
-                        />
-                      ) : null
-                    ))}
-                  </div>
-                ))}
+              <ParamGroups
+                descriptor={inst.descriptor}
+                values={inst.values}
+                colour={colour}
+                onChange={inst.setParam}
+              />
+            )}
+
+            {view === 'fx' && (
+              <div className="flex flex-col lg:flex-row gap-8">
+                <div className="flex-1 min-w-0">
+                  <div className="label mb-3" style={{ color: colour }}>Chain</div>
+                  <ParamGroups
+                    descriptor={inst.fxDescriptor}
+                    values={inst.fxValues}
+                    colour={colour}
+                    onChange={inst.setFxParam}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="label mb-3" style={{ color: 'var(--physical)' }}>Character</div>
+                  <ParamGroups
+                    descriptor={inst.magicDescriptor}
+                    values={inst.magicValues}
+                    colour="var(--physical)"
+                    onChange={inst.setMagicParam}
+                  />
+                </div>
               </div>
             )}
 
@@ -271,7 +267,12 @@ export default function Page(): JSX.Element {
         </div>
 
         {inst.layout === 'keys' ? (
-          <Keys octave={octave} onNoteOn={inst.noteOn} onNoteOff={inst.noteOff} />
+          <Keys
+            octave={octave}
+            held={inst.held}
+            onNoteOn={inst.noteOn}
+            onNoteOff={inst.noteOff}
+          />
         ) : (
           <PadGrid
             rows={4}

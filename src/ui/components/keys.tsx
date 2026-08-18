@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useState, type JSX } from 'react';
+import { useCallback, type JSX } from 'react';
 
 interface KeysProps {
   octave: number;
+  /** Driven by the instrument, so computer-keyboard and MIDI notes light up too. */
+  held: ReadonlySet<number>;
   onNoteOn: (midi: number) => void;
   onNoteOff: (midi: number) => void;
 }
@@ -11,23 +13,11 @@ interface KeysProps {
 const SEMITONES = 24;
 const BLACK = new Set([1, 3, 6, 8, 10]);
 
-export function Keys({ octave, onNoteOn, onNoteOff }: KeysProps): JSX.Element {
-  const [held, setHeld] = useState<ReadonlySet<number>>(new Set());
+export function Keys({ octave, held, onNoteOn, onNoteOff }: KeysProps): JSX.Element {
   const base = 12 * octave;
 
-  const press = useCallback((midi: number): void => {
-    setHeld((prev) => new Set(prev).add(midi));
-    onNoteOn(midi);
-  }, [onNoteOn]);
-
-  const release = useCallback((midi: number): void => {
-    setHeld((prev) => {
-      const next = new Set(prev);
-      next.delete(midi);
-      return next;
-    });
-    onNoteOff(midi);
-  }, [onNoteOff]);
+  const press = useCallback((midi: number): void => { onNoteOn(midi); }, [onNoteOn]);
+  const release = useCallback((midi: number): void => { onNoteOff(midi); }, [onNoteOff]);
 
   return (
     <div
