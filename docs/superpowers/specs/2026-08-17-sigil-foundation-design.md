@@ -357,6 +357,7 @@ anything is called done. Findings that survive verification block the increment.
 |---|---|
 | iOS AudioWorklet slower than V8 benchmark suggests | Mandatory on-device measurement before the engine is signed off; module contract allows a WASM swap |
 | Safari rejects 46 875 Hz offline rendering | Resample fallback, path recorded per render |
+| **`postMessage` never arrives during offline render** — measured 2026-08-17: an `OfflineAudioContext` completes faster than port messages are delivered, so a worklet configured by `postMessage` renders pure silence. The live path measured peak 0.110 under identical settings. | The bounce pipeline must pass patch state via `processorOptions` at node construction, never by `postMessage`. A bounce that returns silence is the failure signature. |
 | Four engines all end up mediocre | One engine per slice, each individually tuned and gated |
 | Descriptor-driven UI becomes generic and soulless | Descriptors carry layout hints and grouping; the Analog surface is hand-designed first, and the generic renderer must reproduce it |
 | Scope growth (this already happened once) | Slice boundaries are contractual; new ideas queue into later slices |
