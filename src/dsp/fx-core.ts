@@ -19,6 +19,38 @@ export function sat(x: number): number {
   return (c * (27 + c2)) / (27 + 9 * c2);
 }
 
+/**
+ * The output stage's ceiling. Signal is untouched below `LIMIT_KNEE` and is
+ * bent smoothly toward `LIMIT_CEIL` above it.
+ */
+export const LIMIT_KNEE = 1.0;
+export const LIMIT_CEIL = 1.5;
+
+/**
+ * Safety limiter with a genuinely linear region.
+ *
+ * The previous output stage was `sat(x / 1.5) * 1.5`, which has no linear
+ * region at all: sat's cubic shaping puts a third-harmonic term on EVERY
+ * sample, growing with level. Measured, that was -48 dB THD+N at -20 dBFS
+ * rising to -30 dB (3.2%) with -0.8 dB of loss at full scale — permanent, on
+ * the default chain, with every effect switched off. Hot sources sat in the
+ * worst of it continuously. It is the mechanism behind a long-standing
+ * complaint that the instrument sounded slightly veiled.
+ *
+ * Below the knee this returns x unchanged — bit-exact, not "nearly". Above it,
+ * u/(1+u) bends toward the ceiling with slope exactly 1 at the knee, so the
+ * transition is C1 continuous and cannot click. Only true overs are shaped,
+ * which is what a safety limiter is for.
+ */
+export function limitOut(x: number): number {
+  const a = x < 0 ? -x : x;
+  if (a <= LIMIT_KNEE) return x;
+  const span = LIMIT_CEIL - LIMIT_KNEE;
+  const u = (a - LIMIT_KNEE) / span;
+  const bent = LIMIT_KNEE + span * (u / (1 + u));
+  return x < 0 ? -bent : bent;
+}
+
 /** Parabolic sine over phase 0..1 — no transcendentals in the sample loop. */
 export function lfo(p: number): number {
   const t = p * 2 - 1;

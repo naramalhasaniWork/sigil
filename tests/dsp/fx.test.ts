@@ -438,3 +438,100 @@ describe('allocation', () => {
     expect(after - before).toBeLessThan(64 * 1024);
   });
 });
+
+/*
+ * The default chain must not touch the signal.
+ *
+ * These exist because it did. Two always-on stages — a quantiser that rounded
+ * every sample to 1/32768 even at the 16-bit default, and an output stage of
+ * `sat(x / 1.5) * 1.5` with no linear region — put measurable distortion on
+ * every sample with every control at zero. Measured: -48 dB THD+N at -20 dBFS
+ * rising to -30 dB and -0.8 dB of level loss at full scale. Nobody had asked
+ * for any of it, and it is the mechanism behind a long-running complaint that
+ * the instrument sounded slightly veiled.
+ *
+ * "Bit-exact" is the assertion on purpose. "Close enough" is how the original
+ * survived this long.
+ */
+describe('transparency at defaults', () => {
+  /** Peak-normalised sine, the signal a voice actually presents. */
+  function sine(n: number, hz: number, amp: number): Float32Array {
+    const b = new Float32Array(n);
+    for (let i = 0; i < n; i++) b[i] = amp * Math.sin((2 * Math.PI * hz * i) / SR);
+    return b;
+  }
+
+  function throughNeutral(input: Float32Array): Float32Array {
+    const fx = new FxChain(SR);
+    neutral(fx);
+    const out = Float32Array.from(input);
+    // Long enough for every smoother to have settled onto its target.
+    fx.process(out, out.length);
+    return out;
+  }
+
+  it('passes a quiet signal through bit-exactly', () => {
+    const input = sine(2048, 220, 0.1);
+    const out = throughNeutral(input);
+    for (let i = 0; i < input.length; i++) {
+      expect(out[i]).toBe(input[i]);
+    }
+  });
+
+  /*
+   * The level that mattered most: physical percussion peaks around -1.6 dBFS
+   * per voice, so hot material sat permanently in the worst of the distortion.
+   */
+  it('passes a hot signal through bit-exactly', () => {
+    const input = sine(2048, 220, 0.95);
+    const out = throughNeutral(input);
+    for (let i = 0; i < input.length; i++) {
+      expect(out[i]).toBe(input[i]);
+    }
+  });
+
+  it('loses no level at full scale', () => {
+    const input = sine(4096, 110, 1);
+    const out = throughNeutral(input);
+    let peakIn = 0, peakOut = 0;
+    for (let i = 0; i < input.length; i++) {
+      const a = Math.abs(input[i] as number), b = Math.abs(out[i] as number);
+      if (a > peakIn) peakIn = a;
+      if (b > peakOut) peakOut = b;
+    }
+    expect(peakOut).toBeCloseTo(peakIn, 6);
+  });
+
+  /*
+   * Transparency must not have been bought by removing the safety net. An
+   * over still has to be caught, and caught smoothly — a hard clip here would
+   * trade a veil for a crackle.
+   */
+  it('still limits signals that exceed full scale', () => {
+    const input = sine(2048, 220, 2.5);
+    const out = throughNeutral(input);
+    let peak = 0;
+    for (let i = 0; i < out.length; i++) {
+      const a = Math.abs(out[i] as number);
+      if (a > peak) peak = a;
+    }
+    expect(peak).toBeLessThanOrEqual(1.5);
+    expect(peak).toBeGreaterThan(1.0);
+  });
+
+  it('limits without a discontinuity at the knee', () => {
+    const fx = new FxChain(SR);
+    neutral(fx);
+    // A slow ramp straight through the knee: adjacent outputs must not jump.
+    const ramp = new Float32Array(4096);
+    for (let i = 0; i < ramp.length; i++) ramp[i] = (i / ramp.length) * 2;
+    fx.process(ramp, ramp.length);
+    let maxStep = 0;
+    for (let i = 1; i < ramp.length; i++) {
+      const step = Math.abs((ramp[i] as number) - (ramp[i - 1] as number));
+      if (step > maxStep) maxStep = step;
+    }
+    // The input steps by 2/4096 ≈ 0.00049 per sample; a kink would exceed it.
+    expect(maxStep).toBeLessThan(0.001);
+  });
+});

@@ -66,7 +66,7 @@ body {
 }
 
 @keyframes sigil-stem {
-  from { stroke-dashoffset: 20; }
+  from { stroke-dashoffset: 14; }
   to   { stroke-dashoffset: 0; }
 }
 
@@ -84,11 +84,22 @@ body {
 }
 
 .sigil-anim .sigil-tine {
-  /* Scales from the stem's x, so each tine extends rightward like a partial
-     sounding rather than a bar sliding in from nowhere. */
-  transform-origin: 4px center;
-  transform-box: fill-box;
-  animation: sigil-tine 300ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  /* Each spoke is struck OUT from the node, so the mark is drawn rather than
+     revealed. stroke-dashoffset rather than a transform, because the spokes
+     radiate in five directions and no single transform-origin serves them all. */
+  stroke-dasharray: 14;
+  animation: sigil-stem 300ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.sigil-anim .sigil-node {
+  transform-origin: 11px 12.5px;
+  transform-box: view-box;
+  animation: sigil-node 260ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes sigil-node {
+  from { transform: scale(0); }
+  to   { transform: scale(1); }
 }
 
 /* Staggered so the fundamental speaks first and the upper partials follow. */
@@ -98,6 +109,6 @@ body {
 .sigil-anim .sigil-tine:nth-of-type(4) { animation-delay: 470ms; }
 
 .sigil-anim .sigil-sweep {
-  stroke-dasharray: 21;
-  animation: sigil-sweep 520ms cubic-bezier(0.3, 0.7, 0.2, 1) 600ms both;
+  stroke-dasharray: 22;
+  animation: sigil-sweep 520ms cubic-bezier(0.3, 0.7, 0.2, 1) 620ms both;
 }

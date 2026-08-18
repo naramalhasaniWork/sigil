@@ -95,40 +95,37 @@ export function SigilMark({
       aria-hidden="true"
       className={animate ? 'sigil-anim' : undefined}
     >
-      {/* The stem: the fundamental everything else is measured from. */}
-      <path
-        className="sigil-stem"
-        d="M4 2 L4 22"
+      {/*
+        A seal: spokes struck from one off-centre node.
+
+        Two rules keep it from collapsing into the generic four-point sparkle
+        that every AI product now wears. First, the angles are irregular — no
+        spoke is the mirror or the right angle of another, so the eye cannot
+        resolve it into a star or a cross. Second, the lengths fall steeply
+        rather than sitting equal, which is the decay of a harmonic series and
+        also the thing that makes it read as an inscribed mark rather than a
+        burst.
+
+        Round caps and joins throughout. The rest of the interface is cut with a
+        3px square rule; the mark is the one drawn object, and rounding is what
+        separates something struck by hand from another box.
+      */}
+      <g
         stroke="var(--ink)"
-        strokeWidth="2.6"
-        strokeLinecap="square"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         fill="none"
-      />
-      {/*
-        Four partials whose lengths fall by roughly two thirds each — the decay
-        an actual harmonic series has. The previous three were evenly chosen by
-        eye and read as a generic "E"; the exponential fall reads as a spectrum,
-        which is what the instrument is for.
-      */}
-      <g stroke="var(--ink)" strokeWidth="2.6" strokeLinecap="square" fill="none">
-        <path className="sigil-tine" d="M4 5.5 L21 5.5" />
-        <path className="sigil-tine" d="M4 10 L15.5 10" />
-        <path className="sigil-tine" d="M4 14.5 L11.5 14.5" />
-        <path className="sigil-tine" d="M4 19 L9 19" />
+      >
+        <path className="sigil-tine" d="M11 12.5 L20.5 4.2" />
+        <path className="sigil-tine" d="M11 12.5 L10.4 3.8" />
+        <path className="sigil-tine" d="M11 12.5 L3.6 10.2" />
+        <path className="sigil-tine" d="M11 12.5 L7.2 19.4" />
+        <path className="sigil-tine" d="M11 12.5 L15.8 17.6" />
       </g>
-      {/*
-        The sweep. Crosses every partial at a slant so the mark can never settle
-        into a letterform, and cuts them at descending points the way a lowpass
-        takes the top of a spectrum off first.
-      */}
-      <path
-        className="sigil-sweep"
-        d="M18.5 2.5 L9 21.5"
-        stroke="var(--analog)"
-        strokeWidth="2.6"
-        strokeLinecap="square"
-        fill="none"
-      />
+
+      {/* The node. The one filled thing, and the only colour. */}
+      <circle className="sigil-node" cx="11" cy="12.5" r="2.1" fill="var(--analog)" />
     </svg>
   );
 }

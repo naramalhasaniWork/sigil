@@ -5,6 +5,7 @@ import {
   P_CH_RATE, P_CH_DEPTH, P_CH_WIDTH, P_CH_MIX,
   P_DL_TIME, P_DL_FB, P_DL_TONE, P_DL_WIDTH, P_DL_MIX,
   P_RV_PREDELAY, P_RV_SIZE, P_RV_DECAY, P_RV_DAMP, P_RV_MIX, P_TRIM,
+  limitOut,
 } from './fx-core';
 import { Reverb } from './fx-reverb';
 
@@ -139,7 +140,11 @@ class Delay {
 
 /** Level the drive stage normalises around: drive changes character, not volume. */
 const DRIVE_REF = 0.35, DRIVE_MAX_G = 24;
-const TILT_HZ = 900, TILT_AMOUNT = 0.9, LIMIT = 1.5;
+const TILT_HZ = 900, TILT_AMOUNT = 0.9;
+
+/** Bits mapped from a full 16: 2^(16-1). At or above this the quantiser is a
+ *  no-op worth skipping rather than a subtle noise floor worth keeping. */
+const CRUSH_TRANSPARENT = 32768;
 
 /** drive -> bitcrush -> chorus -> delay -> reverb -> trim -> safety limiter. */
 /** Below this a mix is inaudible, so the unit is skipped outright. */
@@ -239,9 +244,18 @@ export class FxChain implements FxUnit {
       // Blended in, so drive at zero is bit-exact bypass rather than "nearly".
       x = dry + (w - dry) * (amt * (2 - amt));
     }
-    this.acc += v[P_CRUSH_RATE] as number;
+    const rate = v[P_CRUSH_RATE] as number;
+    this.acc += rate;
     if (this.acc >= 1) { this.acc -= 1; this.held = x; }
     const half = v[P_CRUSH_BITS] as number;
+    /*
+     * Bit-exact bypass when neither crush control is engaged. The quantiser
+     * used to run unconditionally: at the 16-bit default it still rounded every
+     * sample to 1/32768, which is a noise floor nobody asked for on a chain
+     * whose controls are all at zero. Two comparisons are cheaper than the
+     * floor-multiply-divide they replace.
+     */
+    if (rate >= 1 && half >= CRUSH_TRANSPARENT) return this.held;
     return Math.floor(this.held * half + 0.5) / half;
   }
 
@@ -255,7 +269,7 @@ export class FxChain implements FxUnit {
       if (onChorus) x = this.chorus.process(x, v);
       if (onDelay) x = this.delay.process(x, v);
       if (onReverb) x = this.reverb.process(x, v);
-      x = sat((x * (v[P_TRIM] as number)) / LIMIT) * LIMIT;
+      x = limitOut(x * (v[P_TRIM] as number));
       buffer[n] = x === x ? x : 0;
     }
   }
@@ -279,8 +293,8 @@ export class FxChain implements FxUnit {
       if (onChorus) { ch.processStereo(l, r, v); l = ch.oL; r = ch.oR; }
       if (onDelay) { dl.processStereo(l, r, v); l = dl.oL; r = dl.oR; }
       if (onReverb) { rv.processStereo(l, r, v); l = rv.oL; r = rv.oR; }
-      const trim = (v[P_TRIM] as number) / LIMIT;
-      l = sat(l * trim) * LIMIT; r = sat(r * trim) * LIMIT;
+      const trim = v[P_TRIM] as number;
+      l = limitOut(l * trim); r = limitOut(r * trim);
       left[n] = l === l ? l : 0;
       right[n] = r === r ? r : 0;
     }
