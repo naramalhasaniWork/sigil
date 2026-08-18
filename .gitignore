@@ -8,3 +8,6 @@ out/
 *.wav
 *.tsbuildinfo
 .DS_Store
+
+# Scratch trees from adversarial review agents — never history.
+.review-mut/

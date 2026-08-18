@@ -11,7 +11,14 @@ import { NextResponse, type NextRequest } from 'next/server';
  * not a vault. When SIGIL_PASSCODE is unset (local dev), the gate stays open.
  */
 
-const OPEN_PATHS = ['/gate', '/api/gate', '/api/health'];
+/*
+ * `/api/mcp` is open to the PROXY, not to the world: it authenticates itself
+ * with a per-person bearer token in src/mcp/auth.ts, and fails closed in
+ * production when none are configured. It has to be listed here because an MCP
+ * client is not a browser — it cannot follow a redirect to a login form, so the
+ * cookie gate would answer every tool call with a 307 to /gate.
+ */
+const OPEN_PATHS = ['/gate', '/api/gate', '/api/health', '/api/mcp'];
 
 async function sha256Hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
