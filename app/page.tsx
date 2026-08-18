@@ -283,7 +283,24 @@ export default function Page(): JSX.Element {
             </button>
             <span className="label ml-1 hidden sm:inline">[ ]</span>
           </div>
-          <button type="button" className="label" onClick={inst.panic}>Panic</button>
+          <button
+            type="button"
+            aria-label={
+              inst.held.size > 0
+                ? `Panic — release ${inst.held.size} sounding notes`
+                : 'Panic — release all notes'
+            }
+            title="Releases every sounding note. Use it if a note hangs."
+            className="hard border-[3px] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
+            style={{
+              borderColor: 'var(--ink)',
+              background: inst.held.size > 0 ? '#FF3B30' : 'transparent',
+              color: inst.held.size > 0 ? 'var(--bg)' : 'var(--ink)',
+            }}
+            onClick={inst.panic}
+          >
+            Panic{inst.held.size > 0 ? ` ${inst.held.size}` : ''}
+          </button>
         </div>
 
         <ScalePicker state={scaleState} colour={colour} />

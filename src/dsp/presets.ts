@@ -4,6 +4,7 @@ import { ANALOG_PRESETS } from '@/dsp/presets-analog';
 import { FM_PRESETS } from '@/dsp/presets-fm';
 import { PHYSICAL_PRESETS } from '@/dsp/presets-physical';
 import { GRANULAR_PRESETS } from '@/dsp/presets-granular';
+import { WAVETABLE_PRESETS } from '@/dsp/presets-wavetable';
 
 /**
  * A curated starting point. Presets are organised by CHARACTER rather than by
@@ -30,6 +31,7 @@ export const PRESETS: readonly Preset[] = [
   ...FM_PRESETS,
   ...PHYSICAL_PRESETS,
   ...GRANULAR_PRESETS,
+  ...WAVETABLE_PRESETS,
 ];
 
 /**

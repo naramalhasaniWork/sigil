@@ -34,6 +34,29 @@ export function EngineMark({ engineId, colour, size = 22 }: MarkProps): JSX.Elem
           <path d="M8 6 L8 18 M13 8.5 L13 15.5 M17.5 10.5 L17.5 13.5 M21 11.5 L21 12.5" {...stroke} />
         </>
       )}
+      {engineId === 'wavetable' && (
+        // two table layers, simple over complex, with the scan position marked
+        <>
+          <path d="M2 7 Q6.5 2.5 11 7 T20 7" {...stroke} />
+          <path d="M2 17.5 L4.5 14 L7 21 L9.5 14 L12 21 L14.5 14 L17 21 L20 17.5" {...stroke} strokeWidth={2.2} />
+          <rect x="13.5" y="4" width="4" height="4" fill={colour} />
+        </>
+      )}
+      {engineId === 'sampler' && (
+        // a clip held between trim brackets
+        <>
+          <path d="M5 3.5 L2.5 3.5 L2.5 20.5 L5 20.5" {...stroke} strokeWidth={2.2} />
+          <path d="M19 3.5 L21.5 3.5 L21.5 20.5 L19 20.5" {...stroke} strokeWidth={2.2} />
+          <path d="M7.5 15 L7.5 9 M11 18.5 L11 5.5 M14.5 16.5 L14.5 7.5 M17.5 13.5 L17.5 10.5" {...stroke} strokeWidth={2.2} />
+        </>
+      )}
+      {engineId === 'drum' && (
+        // impulses of falling weight on a floor: kick, tom, snare, hat
+        <>
+          <path d="M2 20.5 L22 20.5" {...stroke} strokeWidth={2.2} />
+          <path d="M5 20.5 L5 5 M9.5 20.5 L9.5 12 M14 20.5 L14 8 M18.5 20.5 L18.5 15" {...stroke} strokeWidth={2.6} />
+        </>
+      )}
       {engineId === 'granular' && (
         // a cloud of grains, scattered in time and pitch
         <>
