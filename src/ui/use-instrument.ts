@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
 import { EngineHost } from '@/audio/engine-host';
+import { bouncePatch } from '@/audio/bounce';
+import { KO2_SAMPLE_RATE } from '@/audio/wav';
 import { ENGINES, DEFAULT_ENGINE_ID } from '@/dsp/registry';
 import { PRESETS, presetToValues } from '@/dsp/presets';
 import {
@@ -146,6 +148,53 @@ export function useInstrument() {
     if (host.startRecording()) setRecording(true);
   }, []);
 
+  // ---- Bounce -----------------------------------------------------------
+  const [bouncing, setBouncing] = useState(false);
+  const [lastWav, setLastWav] = useState<{ name: string; bytes: Uint8Array } | null>(null);
+
+  /**
+   * Renders whatever is currently held — a chord bounces as one sample, which
+   * is the material that actually lands on a KO II pad. Offline, through our
+   * own WAV encoder, because MediaRecorder yields MP4/AAC on iOS.
+   */
+  const bounceChord = useCallback(async (name?: string): Promise<void> => {
+    const params = values[engineId];
+    if (!params) return;
+    const notes = held.size > 0 ? [...held] : [60, 63, 67];
+    setBouncing(true);
+    setStatus('Rendering…');
+    try {
+      const result = await bouncePatch({
+        patchParams: Float32Array.from(params),
+        engineId,
+        midiNotes: notes,
+        durationMs: 2600,
+        releaseAtMs: 1300,
+        targetSampleRate: KO2_SAMPLE_RATE,
+      });
+      const label = name ?? `sigil-${engineId}-${notes.join('-')}`;
+      setLastWav({ name: label, bytes: result.wav });
+
+      const blob = new Blob([result.wav.slice().buffer as ArrayBuffer], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${label}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      const kb = Math.round(result.wav.length / 1024);
+      setStatus(
+        `Saved ${label}.wav — ${kb}KB at ${result.sampleRate}Hz` +
+        (result.usedResample ? ' (resampled)' : ' (native KO II rate)'),
+      );
+    } catch (err) {
+      setStatus(err instanceof Error ? `Bounce failed: ${err.message}` : 'Bounce failed');
+    } finally {
+      setBouncing(false);
+    }
+  }, [values, engineId, held]);
+
   const presetsForEngine = useMemo(
     () => PRESETS.filter((p) => p.engineId === engineId),
     [engineId],
@@ -249,6 +298,7 @@ export function useInstrument() {
     layout, chooseLayout,
     held, noteOn, noteOff, panic,
     recording, toggleRecord,
+    bouncing, bounceChord, lastWav,
     presets: presetsForEngine, loadPreset,
     huntVariations, reroll, breedKept, auditionVariation, toggleKeep,
     macros, setMacro, macroNames,

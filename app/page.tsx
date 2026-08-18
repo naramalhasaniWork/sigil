@@ -81,11 +81,11 @@ export default function Page(): JSX.Element {
         <Transport
           running={inst.started}
           recording={inst.recording}
-          bouncing={false}
+          bouncing={inst.bouncing}
           colour={colour}
           onPower={(): void => { void inst.start(); }}
           onToggleRecord={(): void => { void inst.toggleRecord(); }}
-          onBounce={(): void => inst.setStatus('Bounce wiring lands with the kit builder.')}
+          onBounce={(): void => { void inst.bounceChord(); }}
         />
       </header>
 

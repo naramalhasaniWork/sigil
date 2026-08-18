@@ -23,7 +23,7 @@ export interface BounceProcessorOptions {
   readonly mode: 'bounce';
   readonly engineId: string;
   readonly patchParams: Float32Array;
-  readonly midiNote: number;
+  readonly midiNotes: readonly number[];
   readonly velocity: number;
   /** Frame at which the voice is released, relative to render start. */
   readonly releaseFrame: number;
@@ -34,7 +34,8 @@ export interface BounceProcessorOptions {
 export interface BounceOptions {
   patchParams: Float32Array;
   engineId: string;
-  midiNote: number;
+  /** Every note sounds together, so a held chord bounces as one sample. */
+  midiNotes: readonly number[];
   durationMs: number;
   releaseAtMs: number;
   targetSampleRate: number;
@@ -105,7 +106,7 @@ export async function bouncePatch(opts: BounceOptions): Promise<BounceResult> {
     engineId: opts.engineId,
     // Copied: the caller's patch buffer must not be observable mid-render.
     patchParams: opts.patchParams.slice(),
-    midiNote: opts.midiNote,
+    midiNotes: opts.midiNotes,
     velocity: 1,
     releaseFrame: Math.max(0, Math.round((opts.releaseAtMs / 1000) * renderRate)),
     renderFrames,

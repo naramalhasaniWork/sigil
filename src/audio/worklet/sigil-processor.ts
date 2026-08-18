@@ -65,26 +65,35 @@ class SigilProcessor extends AudioWorkletProcessor {
     this.active = fallback;
 
     // Offline rendering never delivers postMessage before it finishes, so the
-    // bounce path configures the processor here instead.
+    // bounce path configures the processor here instead. This mirrors
+    // BounceProcessorOptions in src/audio/bounce.ts — keep them in step.
     const opts = options?.processorOptions;
-    if (opts) {
+    if (opts && opts['mode'] === 'bounce') {
       const engineId = opts['engineId'];
       if (typeof engineId === 'string') {
         const vm = this.managers.get(engineId);
         if (vm) this.active = vm;
       }
-      const values = opts['params'];
+      const values = opts['patchParams'];
       if (values instanceof Float32Array) {
         for (let i = 0; i < values.length; i++) {
           this.active.setParam(i, values[i] as number);
         }
       }
-      const note = opts['midiNote'];
-      if (typeof note === 'number') this.active.noteOn(note, 1);
-      const releaseAt = opts['releaseAtSample'];
-      if (typeof releaseAt === 'number') this.releaseAtSample = releaseAt;
-      const held = opts['midiNote'];
-      if (typeof held === 'number') this.heldNote = held;
+      const releaseFrame = opts['releaseFrame'];
+      if (typeof releaseFrame === 'number') this.releaseAtSample = releaseFrame;
+
+      const velocityOpt = opts['velocity'];
+      const velocity = typeof velocityOpt === 'number' ? velocityOpt : 1;
+      const notes = opts['midiNotes'];
+      if (Array.isArray(notes)) {
+        for (const n of notes) {
+          if (typeof n === 'number') {
+            this.active.noteOn(n, velocity);
+            this.bounceNotes.push(n);
+          }
+        }
+      }
     }
 
     this.port.onmessage = (e: MessageEvent<InboundMessage>): void => {
@@ -121,7 +130,7 @@ class SigilProcessor extends AudioWorkletProcessor {
   }
 
   private releaseAtSample = -1;
-  private heldNote = -1;
+  private readonly bounceNotes: number[] = [];
   private samplesRendered = 0;
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
@@ -133,11 +142,11 @@ class SigilProcessor extends AudioWorkletProcessor {
     left.fill(0);
     this.active.render(left, left.length);
 
-    if (this.releaseAtSample >= 0 && this.heldNote >= 0) {
+    if (this.releaseAtSample >= 0 && this.bounceNotes.length > 0) {
       this.samplesRendered += left.length;
       if (this.samplesRendered >= this.releaseAtSample) {
-        this.active.noteOff(this.heldNote);
-        this.heldNote = -1;
+        for (const n of this.bounceNotes) this.active.noteOff(n);
+        this.bounceNotes.length = 0;
       }
     }
 
