@@ -15,7 +15,9 @@ const TWO_PI = 6.283185307179586;
 const LOG2_REF = 8.03125;
 const CONTROL_STEP = 8;
 const OSC_GAIN = 0.9;
-const VOICE_GAIN = 0.35;
+/* Level-matched with the other engines — see analog-voice.ts. Measured -16.6
+ * dBFS at default against FM's -10.8. */
+const VOICE_GAIN = 0.55;
 
 const TABLE_COUNT = 8;
 const TABLE_SIZE = 2048;

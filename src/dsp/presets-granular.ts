@@ -20,7 +20,7 @@ export const GRANULAR_PRESETS: readonly Preset[] = [
     id: 'murmuration', name: 'Murmuration', engineId: 'granular',
     character: ['huge', 'sweeping'],
     values: {
-      'grain-density': 90, 'grain-size': 190, 'position': 0.5, 'spray': 0.3,
+      'grain-density': 60, 'grain-size': 120, 'position': 0.5, 'spray': 0.3,
       'pitch-scatter': 0.15, 'reverse': 0.2, 'window-shape': 1,
       'amp-attack': 2400, 'amp-decay': 3000, 'amp-sustain': 0.9, 'amp-release': 4500,
     },
@@ -38,7 +38,7 @@ export const GRANULAR_PRESETS: readonly Preset[] = [
     id: 'vapor-column', name: 'Vapor Column', engineId: 'granular',
     character: ['huge', 'warm', 'sweeping'],
     values: {
-      'grain-density': 130, 'grain-size': 320, 'position': 0.25, 'spray': 0.18,
+      'grain-density': 90, 'grain-size': 140, 'position': 0.25, 'spray': 0.18,
       'pitch-scatter': 0.1, 'reverse': 0.1, 'window-shape': 1,
       'amp-attack': 3200, 'amp-decay': 4000, 'amp-sustain': 0.95, 'amp-release': 6000,
     },
@@ -65,8 +65,8 @@ export const GRANULAR_PRESETS: readonly Preset[] = [
     id: 'tide-pool', name: 'Tide Pool', engineId: 'granular',
     character: ['warm', 'dark'],
     values: {
-      'grain-density': 45, 'grain-size': 230, 'position': 0.08, 'spray': 0.15,
-      'pitch-scatter': 0.2, 'reverse': 0.25, 'window-shape': 0.9,
+      'grain-density': 12, 'grain-size': 380, 'position': 0.08, 'spray': 0.3,
+      'pitch-scatter': 0.4, 'reverse': 0.25, 'window-shape': 0.9,
       'amp-attack': 600, 'amp-decay': 2000, 'amp-sustain': 0.8, 'amp-release': 2400,
     },
   },

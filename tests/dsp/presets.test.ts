@@ -5,6 +5,7 @@ import { FM_DESCRIPTOR } from '@/dsp/fm-descriptor';
 import { PHYSICAL_DESCRIPTOR } from '@/dsp/physical-descriptor';
 import { GRANULAR_DESCRIPTOR } from '@/dsp/granular-descriptor';
 import { WAVETABLE_DESCRIPTOR } from '@/dsp/wavetable-descriptor';
+import { SAMPLER_DESCRIPTOR } from '@/dsp/sampler-descriptor';
 import {
   PRESETS,
   presetToValues,
@@ -20,6 +21,7 @@ const DESCRIPTORS: Readonly<Record<string, EngineDescriptor>> = {
   physical: PHYSICAL_DESCRIPTOR,
   granular: GRANULAR_DESCRIPTOR,
   wavetable: WAVETABLE_DESCRIPTOR,
+  sampler: SAMPLER_DESCRIPTOR,
 };
 
 const CHARACTER_VOCABULARY = new Set([

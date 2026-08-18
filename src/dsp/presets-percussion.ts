@@ -14,7 +14,7 @@ export const PERCUSSION_PRESETS: readonly Preset[] = [
     id: 'pc-floor-kick', name: 'Floor Kick', engineId: 'physical',
     character: ['dark', 'huge', 'wooden'],
     values: {
-      material: 0.02, structure: 0.1, decay: 260, damping: 0.62, position: 0.12,
+      material: 0.02, structure: 0.1, decay: 480, damping: 0.48, position: 0.12,
       air: 0.15, 'exciter-type': 0, grit: 0.18, hardness: 22,
       'exciter-tone': 900, release: 90, level: 0.85,
     },
@@ -25,7 +25,7 @@ export const PERCUSSION_PRESETS: readonly Preset[] = [
     values: {
       material: 0.06, structure: 0.22, decay: 700, damping: 0.4, position: 0.3,
       air: 0.35, 'exciter-type': 0, grit: 0.3, hardness: 12,
-      'exciter-tone': 1800, release: 220, level: 0.82,
+      'exciter-tone': 1800, release: 220, level: 0.72,
     },
   },
   {
@@ -43,7 +43,7 @@ export const PERCUSSION_PRESETS: readonly Preset[] = [
     values: {
       material: 0.28, structure: 0.7, decay: 70, damping: 0.72, position: 0.9,
       air: 0.3, 'exciter-type': 0, grit: 0.4, hardness: 58,
-      'exciter-tone': 9000, release: 25, level: 0.7,
+      'exciter-tone': 9000, release: 25, level: 0.9,
     },
   },
   {
@@ -61,7 +61,7 @@ export const PERCUSSION_PRESETS: readonly Preset[] = [
     values: {
       material: 0.4, structure: 0.18, decay: 420, damping: 0.34, position: 0.28,
       air: 0.3, 'exciter-type': 0, grit: 0.16, hardness: 9,
-      'exciter-tone': 3000, release: 160, level: 0.8,
+      'exciter-tone': 3000, release: 160, level: 0.72,
     },
   },
   {
@@ -70,7 +70,7 @@ export const PERCUSSION_PRESETS: readonly Preset[] = [
     values: {
       material: 0.74, structure: 0.85, decay: 55, damping: 0.8, position: 0.94,
       air: 0.7, 'exciter-type': 1, grit: 0.55, hardness: 70,
-      'exciter-tone': 13000, release: 20, level: 0.62,
+      'exciter-tone': 13000, release: 20, level: 0.95,
     },
   },
   {
@@ -97,7 +97,7 @@ export const PERCUSSION_PRESETS: readonly Preset[] = [
     values: {
       material: 0.6, structure: 0.12, decay: 1400, damping: 0.18, position: 0.2,
       air: 0.4, 'exciter-type': 0, grit: 0.1, hardness: 7,
-      'exciter-tone': 3600, release: 520, level: 0.8,
+      'exciter-tone': 3600, release: 520, level: 0.66,
     },
   },
   {

@@ -6,6 +6,7 @@ import { PHYSICAL_PRESETS } from '@/dsp/presets-physical';
 import { GRANULAR_PRESETS } from '@/dsp/presets-granular';
 import { WAVETABLE_PRESETS } from '@/dsp/presets-wavetable';
 import { PERCUSSION_PRESETS } from '@/dsp/presets-percussion';
+import { SAMPLER_PRESETS } from '@/dsp/presets-sampler';
 
 /**
  * A curated starting point. Presets are organised by CHARACTER rather than by
@@ -34,6 +35,7 @@ export const PRESETS: readonly Preset[] = [
   ...GRANULAR_PRESETS,
   ...WAVETABLE_PRESETS,
   ...PERCUSSION_PRESETS,
+  ...SAMPLER_PRESETS,
 ];
 
 /**

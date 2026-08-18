@@ -19,9 +19,9 @@ export const PHYSICAL_PRESETS: readonly Preset[] = [
     id: 'rosewood-steps', name: 'Rosewood Steps', engineId: 'physical',
     character: ['wooden', 'plucked', 'warm'],
     values: {
-      'material': 0.34, 'structure': 0.08, 'decay': 380, 'damping': 0.55,
+      'material': 0.34, 'structure': 0.08, 'decay': 700, 'damping': 0.4,
       'position': 0.3, 'air': 0.4, 'exciter-type': 0, 'grit': 0.2,
-      'hardness': 7, 'exciter-tone': 2800,
+      'hardness': 7, 'exciter-tone': 2800, 'level': 0.62,
     },
   },
   {
@@ -39,7 +39,7 @@ export const PHYSICAL_PRESETS: readonly Preset[] = [
     values: {
       'material': 0.72, 'structure': 0.85, 'decay': 500, 'damping': 0.25,
       'position': 0.05, 'air': 0.85, 'exciter-type': 1, 'grit': 0.85,
-      'hardness': 2, 'exciter-tone': 12000,
+      'hardness': 2, 'exciter-tone': 12000, 'level': 0.95,
     },
   },
   {
@@ -64,9 +64,9 @@ export const PHYSICAL_PRESETS: readonly Preset[] = [
     id: 'muffled-parade', name: 'Muffled Parade', engineId: 'physical',
     character: ['dark', 'hollow'],
     values: {
-      'material': 0.08, 'structure': 0.04, 'decay': 260, 'damping': 0.9,
+      'material': 0.08, 'structure': 0.04, 'decay': 600, 'damping': 0.7,
       'position': 0.45, 'air': 0.2, 'exciter-type': 0, 'grit': 0.35,
-      'hardness': 20, 'exciter-tone': 600,
+      'hardness': 20, 'exciter-tone': 600, 'level': 0.66,
     },
   },
   {
@@ -74,17 +74,17 @@ export const PHYSICAL_PRESETS: readonly Preset[] = [
     character: ['huge', 'metallic', 'dark'],
     values: {
       'material': 0.78, 'structure': 0.75, 'decay': 3000, 'damping': 0.08,
-      'position': 0.5, 'air': 0.8, 'exciter-type': 0, 'grit': 0.2,
-      'hardness': 45, 'exciter-tone': 1000, 'level': 0.8,
+      'position': 0.5, 'air': 0.8, 'exciter-type': 0, 'grit': 0.3,
+      'hardness': 8, 'exciter-tone': 3200, 'level': 1,
     },
   },
   {
     id: 'splinter', name: 'Splinter', engineId: 'physical',
     character: ['aggressive', 'wooden'],
     values: {
-      'material': 0.3, 'structure': 0.2, 'decay': 90, 'damping': 0.6,
-      'position': 0.04, 'air': 0.5, 'exciter-type': 1, 'grit': 0.95,
-      'hardness': 0.2, 'exciter-tone': 15000,
+      'material': 0.45, 'structure': 0.5, 'decay': 600, 'damping': 0.25,
+      'position': 0.1, 'air': 0.5, 'exciter-type': 1, 'grit': 0.95,
+      'hardness': 0.2, 'exciter-tone': 15000, 'level': 1,
     },
   },
   {

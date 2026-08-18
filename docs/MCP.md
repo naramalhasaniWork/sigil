@@ -146,7 +146,7 @@ of the piece.
 ```json
 {"name": "add_track", "arguments": {
   "arrangementId": "arr_cold_room", "name": "Keys", "engineId": "analog",
-  "presetId": "glass-rain", "values": {"filter-cutoff": 900}}}
+  "presetId": "frost-lattice", "values": {"filter-cutoff": 900}}}
 ```
 ```json
 {"trackId": "track_keys", "warnings": [], "remainingSlots": 7,

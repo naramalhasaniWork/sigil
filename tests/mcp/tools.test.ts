@@ -22,7 +22,9 @@ import {
   type SerialisedArrangement,
   type ToolResult,
 } from '@/mcp/tools';
-import { TOOLS, TOOL_BY_NAME, handleMessage, handlePayload } from '@/mcp/server';
+import {
+  MCP_PROTOCOL_VERSION, TOOLS, TOOL_BY_NAME, handleMessage, handlePayload,
+} from '@/mcp/server';
 import { SCALES, type ScaleName } from '@/dsp/chords';
 import { PPQ } from '@/dsp/sequencer';
 
@@ -122,7 +124,7 @@ describe('patch tools', () => {
   it('builds a patch from a preset and keeps a partial override', async () => {
     const data = await ok<PatchOut>(createPatch({
       engineId: 'analog',
-      presetId: 'glass-rain',
+      presetId: 'frost-lattice',
       values: { 'filter-cutoff': 800 },
     }));
     expect(data.patch.engineId).toBe('analog');
@@ -150,7 +152,7 @@ describe('patch tools', () => {
   });
 
   it('refuses a preset written for a different engine', async () => {
-    const message = await refuse(createPatch({ engineId: 'fm', presetId: 'glass-rain' }));
+    const message = await refuse(createPatch({ engineId: 'fm', presetId: 'frost-lattice' }));
     expect(message).toContain('analog');
   });
 
@@ -365,10 +367,10 @@ describe('arrangement mutations', () => {
     const data = await ok<{ track: { patch?: { values: Record<string, number> }; presetId?: string; gain?: number } }>(
       addTrack(store, {
         arrangementId: id, name: 'Pad', engineId: 'analog',
-        presetId: 'glass-rain', values: { 'filter-cutoff': 600 }, gain: 0.5,
+        presetId: 'frost-lattice', values: { 'filter-cutoff': 600 }, gain: 0.5,
       }),
     );
-    expect(data.track.presetId).toBe('glass-rain');
+    expect(data.track.presetId).toBe('frost-lattice');
     expect(data.track.patch?.values['filter-cutoff']).toBe(600);
     expect(data.track.gain).toBe(0.5);
   });
@@ -599,6 +601,92 @@ describe('the MCP protocol layer', () => {
     expect(result.content[0]?.text).toContain('name');
   });
 
+  /*
+   * The whole tools/call response shape, not just the half a reader notices.
+   * `structuredContent` is the field an MCP client parses; `content` is the
+   * fallback a human reads. A regression that drops the structured half leaves
+   * the text half working, so it is invisible unless something asserts it.
+   */
+  it('returns the tool data as structuredContent as well as text, on success', async () => {
+    const store = createMemoryStore();
+    const res = await handleMessage(store, {
+      jsonrpc: '2.0', id: 7, method: 'tools/call',
+      params: { name: 'list_engines', arguments: {} },
+    });
+    expect(res?.jsonrpc).toBe('2.0');
+    expect(res?.id).toBe(7);
+    const result = res?.result as {
+      content: { type: string; text: string }[];
+      structuredContent?: unknown;
+      isError?: boolean;
+    };
+    const direct = await listEngines({});
+    expect(direct.ok).toBe(true);
+    // The structured half IS the tool's data, not a summary of it.
+    expect(result.structuredContent).toEqual(direct.ok ? direct.data : null);
+    expect(result.structuredContent).not.toBeUndefined();
+    // And the text half is the same thing, readable.
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]?.type).toBe('text');
+    expect(JSON.parse(result.content[0]?.text ?? 'null')).toEqual(result.structuredContent);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it('carries no structuredContent on a refusal — there is no data to structure', async () => {
+    const store = createMemoryStore();
+    const res = await handleMessage(store, {
+      jsonrpc: '2.0', id: 8, method: 'tools/call',
+      params: { name: 'describe_engine', arguments: { engineId: 'moog' } },
+    });
+    const result = res?.result as {
+      content: { type: string; text: string }[];
+      structuredContent?: unknown;
+      isError?: boolean;
+    };
+    expect(result.isError).toBe(true);
+    expect('structuredContent' in result).toBe(false);
+    expect(result.content[0]?.type).toBe('text');
+    const parsed = JSON.parse(result.content[0]?.text ?? '{}') as { error?: string };
+    expect(parsed.error).toContain('moog');
+  });
+
+  it('echoes the envelope: jsonrpc, the caller\'s id, and one of result or error', async () => {
+    const store = createMemoryStore();
+    const pong = await handleMessage(store, { jsonrpc: '2.0', id: 'abc', method: 'ping' });
+    expect(pong?.jsonrpc).toBe('2.0');
+    expect(pong?.id).toBe('abc');
+    expect(pong?.result).toEqual({});
+    expect(pong?.error).toBeUndefined();
+    const nope = await handleMessage(store, { jsonrpc: '2.0', id: 9, method: 'nope' });
+    expect(nope?.id).toBe(9);
+    expect(nope?.result).toBeUndefined();
+    expect(typeof nope?.error?.message).toBe('string');
+  });
+
+  it('serves initialize and tools/list with every field a client reads', async () => {
+    const store = createMemoryStore();
+    const init = await handleMessage(store, { jsonrpc: '2.0', id: 10, method: 'initialize' });
+    const initResult = init?.result as {
+      protocolVersion: string;
+      capabilities: { tools?: unknown };
+      serverInfo: { name: string; version: string };
+    };
+    expect(initResult.protocolVersion).toBe(MCP_PROTOCOL_VERSION);
+    expect(initResult.capabilities.tools).toBeDefined();
+    expect(initResult.serverInfo.name).toBe('sigil');
+    expect(initResult.serverInfo.version).toMatch(/^\d+\.\d+\.\d+$/);
+
+    const listed = await handleMessage(store, { jsonrpc: '2.0', id: 11, method: 'tools/list' });
+    const tools = (listed?.result as { tools: Record<string, unknown>[] }).tools;
+    for (const tool of tools) {
+      const spec = TOOL_BY_NAME.get(tool['name'] as string);
+      expect(spec).toBeDefined();
+      expect(tool['title']).toBe(spec?.title);
+      expect(tool['description']).toBe(spec?.description);
+      expect(tool['inputSchema']).toEqual(spec?.inputSchema);
+    }
+  });
+
   it('errors usefully on an unknown tool or method', async () => {
     const store = createMemoryStore();
     const unknownTool = await handleMessage(store, {
@@ -638,7 +726,7 @@ describe('a whole short piece, composed by tool call', () => {
       sections: [{ name: 'Intro', bars: 4 }, { name: 'Body', bars: 8 }, { name: 'Outro', bars: 4 }],
     }));
     await ok(addTrack(store, {
-      arrangementId, name: 'Keys', engineId: 'analog', presetId: 'glass-rain',
+      arrangementId, name: 'Keys', engineId: 'analog', presetId: 'frost-lattice',
     }));
     await ok(addTrack(store, { arrangementId, name: 'Bass', engineId: 'fm', gain: 0.7 }));
 

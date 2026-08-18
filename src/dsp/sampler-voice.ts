@@ -18,7 +18,9 @@ const DEFAULT_SR = 48000, DEFAULT_ROOT = 261.6255653;
 const EDGE_FADE = 96, INV_EDGE_FADE = 1 / EDGE_FADE;
 /** Below this a loop is shorter than the crossfade machinery can handle. */
 const MIN_LOOP = 32;
-const VOICE_GAIN = 0.85;
+/* Trimmed rather than raised: the sampler was the loudest engine at -7.2 dBFS,
+ * and it is the one whose level also depends on the material loaded into it. */
+const VOICE_GAIN = 0.7;
 
 /**
  * The sample every voice plays, held at module level. Voices keep no copy and

@@ -82,15 +82,6 @@ export const WAVETABLE_PRESETS: readonly Preset[] = [
     },
   },
   {
-    id: 'wt-cold-wire', name: 'Cold Wire', engineId: 'wavetable',
-    character: ['glassy', 'dark'],
-    values: {
-      'table-position': 0.82, 'position-env': 0.15, 'osc-detune': 0.05,
-      'filter-cutoff': 7000, 'filter-resonance': 0.3, 'filter-env': 0.15, 'drive': 0.06,
-      'amp-attack': 4, 'amp-decay': 700, 'amp-sustain': 0.35, 'amp-release': 500,
-    },
-  },
-  {
     id: 'wt-slow-tide', name: 'Slow Tide', engineId: 'wavetable',
     character: ['sweeping', 'hollow'],
     values: {

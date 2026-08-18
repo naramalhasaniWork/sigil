@@ -28,7 +28,13 @@ const LOG2_REF = 8.0312500;
 const CONTROL_STEP = 8;
 const MAX_UNISON = 4;
 const OSC_GAIN = 0.8;
-const VOICE_GAIN = 0.35;
+/*
+ * Level-matched across engines, measured rather than chosen: at 0.35 an analog
+ * default peaked at -16.9 dBFS against FM's -10.8 and the sampler's -7.2, so
+ * changing engine was a volume ride of nearly 10 dB and every comparison was
+ * really a loudness comparison.
+ */
+const VOICE_GAIN = 0.55;
 
 /** Cheap rational tanh — monotonic, bounded, shaped for hot loops. */
 function saturate(x: number): number {

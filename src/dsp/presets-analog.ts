@@ -1,6 +1,11 @@
 import type { Preset } from '@/dsp/presets';
 
-/** The analog bank: subtractive staples, from glass plucks to broken drones. */
+/**
+ * The analog bank: subtractive staples, from glass plucks to broken drones,
+ * plus the three workhorses every track reaches for — a unison wall, a sine
+ * sub and a diode-filter acid line. Presets that only restated a neighbour at
+ * a different decay were cut; each survivor owns its own territory.
+ */
 export const ANALOG_PRESETS: readonly Preset[] = [
   {
     id: 'frost-lattice', name: 'Frost Lattice', engineId: 'analog',
@@ -9,15 +14,6 @@ export const ANALOG_PRESETS: readonly Preset[] = [
       'osc-detune': 0.03, 'osc-drift': 0.1, 'filter-cutoff': 9000, 'filter-resonance': 0.35,
       'filter-env': 0.45, 'amp-attack': 0.5, 'amp-decay': 260, 'amp-sustain': 0,
       'amp-release': 380, 'drive': 0.05,
-    },
-  },
-  {
-    id: 'glass-rain', name: 'Glass Rain', engineId: 'analog',
-    character: ['glassy', 'plucked'],
-    values: {
-      'osc-detune': 0.015, 'osc-drift': 0.05, 'filter-cutoff': 12000, 'filter-resonance': 0.22,
-      'filter-env': 0.3, 'amp-attack': 0.5, 'amp-decay': 150, 'amp-sustain': 0,
-      'amp-release': 220, 'drive': 0.02,
     },
   },
   {
@@ -39,12 +35,13 @@ export const ANALOG_PRESETS: readonly Preset[] = [
     },
   },
   {
-    id: 'slow-weather', name: 'Slow Weather', engineId: 'analog',
-    character: ['sweeping', 'huge', 'warm'],
+    id: 'aurora-wall', name: 'Aurora Wall', engineId: 'analog',
+    character: ['sweeping', 'glassy'],
     values: {
-      'osc-detune': 0.3, 'osc-drift': 0.75, 'filter-cutoff': 1200, 'filter-resonance': 0.28,
-      'filter-env': 0.6, 'amp-attack': 2200, 'amp-decay': 4000, 'amp-sustain': 0.9,
-      'amp-release': 5000, 'drive': 0.12,
+      'unison-voices': 4, 'unison-detune': 0.6, 'osc-detune': 0.1, 'osc-drift': 0.2,
+      'filter-cutoff': 6500, 'filter-resonance': 0.12, 'filter-env': 0.25,
+      'sub-level': 0.25, 'drive': 0.25, 'amp-attack': 6, 'amp-decay': 800,
+      'amp-sustain': 0.8, 'amp-release': 350, 'lfo-cutoff': 0.15, 'lfo-rate': 0.4,
     },
   },
   {
@@ -63,6 +60,16 @@ export const ANALOG_PRESETS: readonly Preset[] = [
       'osc-detune': 0.22, 'osc-drift': 0.5, 'filter-cutoff': 420, 'filter-resonance': 0.1,
       'filter-env': 0.25, 'amp-attack': 900, 'amp-decay': 3000, 'amp-sustain': 0.7,
       'amp-release': 3600, 'drive': 0.3,
+    },
+  },
+  {
+    id: 'bedrock', name: 'Bedrock', engineId: 'analog',
+    character: ['dark', 'warm'],
+    values: {
+      'osc1-wave': 3, 'osc2-wave': 3, 'osc-detune': 0.01, 'osc-drift': 0.05,
+      'sub-mode': 2, 'sub-level': 0.85, 'filter-cutoff': 900, 'filter-resonance': 0.05,
+      'filter-env': 0.2, 'filter-keytrack': 0, 'drive': 0.35, 'amp-attack': 1,
+      'amp-decay': 500, 'amp-sustain': 0.85, 'amp-release': 120,
     },
   },
   {
@@ -111,21 +118,23 @@ export const ANALOG_PRESETS: readonly Preset[] = [
     },
   },
   {
-    id: 'switchblade', name: 'Switchblade', engineId: 'analog',
-    character: ['aggressive', 'plucked'],
+    id: 'battery-acid', name: 'Battery Acid', engineId: 'analog',
+    character: ['aggressive'],
     values: {
-      'osc-detune': 0.07, 'osc-drift': 0.2, 'filter-cutoff': 3400, 'filter-resonance': 0.62,
-      'filter-env': 0.88, 'amp-attack': 0.5, 'amp-decay': 120, 'amp-sustain': 0.1,
-      'amp-release': 100, 'drive': 0.85,
+      'filter-model': 2, 'filter-cutoff': 2400, 'filter-resonance': 0.6,
+      'filter-env': 0.9, 'filter-velocity': 0.7, 'filter-keytrack': 0.5,
+      'drive': 0.5, 'sub-level': 0.5, 'osc-detune': 0.02, 'osc-drift': 0.1,
+      'glide': 70, 'amp-attack': 1, 'amp-decay': 260, 'amp-sustain': 0.45,
+      'amp-release': 90,
     },
   },
   {
-    id: 'rust-and-teeth', name: 'Rust and Teeth', engineId: 'analog',
-    character: ['aggressive', 'broken'],
+    id: 'switchblade', name: 'Switchblade', engineId: 'analog',
+    character: ['aggressive', 'plucked'],
     values: {
-      'osc-detune': 0.18, 'osc-drift': 0.35, 'filter-cutoff': 900, 'filter-resonance': 0.72,
-      'filter-env': 0.85, 'amp-attack': 1, 'amp-decay': 180, 'amp-sustain': 0.45,
-      'amp-release': 160, 'drive': 0.92,
+      'osc-detune': 0.07, 'osc-drift': 0.2, 'filter-cutoff': 4200, 'filter-resonance': 0.62,
+      'filter-env': 0.88, 'amp-attack': 0.5, 'amp-decay': 120, 'amp-sustain': 0.1,
+      'amp-release': 100, 'drive': 0.5, 'sub-level': 0.5,
     },
   },
   {
