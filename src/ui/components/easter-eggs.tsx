@@ -7,6 +7,19 @@ import { Pressable } from '@/ui/components/pressable';
  * Class the app puts on its root while ritual mode is on. The styling lives in
  * globals.css so the mode is a skin, not a second UI.
  */
+/**
+ * The secrets, listed in the credits panel. A hidden feature nobody can find is
+ * just unreachable code, so one hidden door documents the rest.
+ */
+export const SECRETS: readonly { keys: string; what: string }[] = [
+  { keys: 'Double-tap the mark', what: 'A/B compare — store a snapshot, then flip between it and your edits' },
+  { keys: 'Panic twice, quickly', what: 'Reset the patch to the engine defaults' },
+  { keys: 'Shift-click a value', what: 'Return that one parameter to its default' },
+  { keys: 'Hold the mark 5s', what: 'This panel' },
+  { keys: 'Hold a tritone 3s', what: 'A note on the most argued-about interval in music' },
+  { keys: '↑ ↑ ↓ ↓ ← → ← → B A', what: 'Ritual mode — inverts the palette. B is also a note key, so it will sound' },
+];
+
 export const RITUAL_CLASS = 'sigil-ritual';
 
 /**
@@ -225,8 +238,25 @@ export function CreditsPanel(
           </p>
         ))}
         <p className="text-[12px] leading-snug" style={{ color: 'var(--ink)' }}>
-          You found this by holding the mark for five seconds. There are two more.
+          You found this by holding the mark for five seconds. Here is everything
+          else that is hidden — three of them are real shortcuts, not decoration.
         </p>
+
+        <ul className="flex flex-col gap-1.5 border-t-[3px] pt-2.5" style={{ borderColor: 'var(--ink)' }}>
+          {SECRETS.map((secret) => (
+            <li key={secret.keys} className="flex flex-col gap-0.5">
+              <span
+                className="text-[10px] font-bold uppercase tracking-[0.12em]"
+                style={{ color: 'var(--analog)' }}
+              >
+                {secret.keys}
+              </span>
+              <span className="text-[11px] leading-snug" style={{ color: 'var(--ink)' }}>
+                {secret.what}
+              </span>
+            </li>
+          ))}
+        </ul>
         <div className="pt-1">
           <Pressable onPress={onClose} ariaLabel="Close credits">Close</Pressable>
         </div>

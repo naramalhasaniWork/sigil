@@ -16,6 +16,7 @@ import { SetupPanel, type SetupSection } from '@/ui/components/setup-panel';
 import { HandControlPanel } from '@/ui/components/hand-control-panel';
 import { useKit } from '@/ui/use-kit';
 import { useHandPlay } from '@/ui/use-hand-play';
+import { useSecrets } from '@/ui/use-secrets';
 import type { HandReading } from '@/ui/use-hand-control';
 import { DEFAULT_PAD_CHORDS } from '@/dsp/midi-chords';
 import { MacroRow } from '@/ui/components/macro-row';
@@ -42,6 +43,22 @@ export default function Page(): JSX.Element {
   const kit = useKit();
   const [setupSection, setSetupSection] = useState<SetupSection>('kit');
   const showCamera = view === 'setup' && setupSection === 'camera';
+
+  const engineDefaults = useMemo(() => {
+    const params = inst.descriptor?.params;
+    if (!params) return undefined;
+    const out = new Float32Array(params.length);
+    for (let i = 0; i < params.length; i++) out[i] = params[i]?.default ?? 0;
+    return out;
+  }, [inst.descriptor]);
+
+  const secrets = useSecrets({
+    values: inst.values,
+    loadValues: inst.loadValues,
+    defaults: engineDefaults,
+    onReveal: (message): void => inst.setStatus(message),
+    panic: inst.panic,
+  });
 
   const eggs = useEasterEggs({
     onReveal: (_id, label): void => inst.setStatus(label),
@@ -144,6 +161,8 @@ export default function Page(): JSX.Element {
         recording={inst.recording}
         bouncing={inst.bouncing}
         holdProps={eggs.holdProps as unknown as Record<string, unknown>}
+        onMarkDoubleClick={secrets.toggleAB}
+        snapshotState={secrets.hasSnapshot ? (secrets.onSnapshot ? 'A' : 'B') : null}
         onPower={(): void => { void inst.start(); }}
         onToggleRecord={(): void => { void inst.toggleRecord(); }}
         onBounce={(): void => { void inst.bounceChord(); }}
@@ -375,7 +394,7 @@ export default function Page(): JSX.Element {
               background: inst.held.size > 0 ? '#FF3B30' : 'transparent',
               color: inst.held.size > 0 ? 'var(--bg)' : 'var(--ink)',
             }}
-            onClick={inst.panic}
+            onClick={secrets.panicPressed}
           >
             Panic{inst.held.size > 0 ? ` ${inst.held.size}` : ''}
           </button>

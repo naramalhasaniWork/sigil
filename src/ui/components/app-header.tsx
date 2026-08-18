@@ -13,6 +13,10 @@ interface AppHeaderProps {
   recording: boolean;
   bouncing: boolean;
   holdProps: Record<string, unknown>;
+  /** Double-tap the mark to store and A/B a snapshot. */
+  onMarkDoubleClick: () => void;
+  /** 'A' while hearing the snapshot, 'B' while hearing live edits. */
+  snapshotState: 'A' | 'B' | null;
   onPower: () => void;
   onToggleRecord: () => void;
   onBounce: () => void;
@@ -21,7 +25,7 @@ interface AppHeaderProps {
 
 export function AppHeader({
   engineName, sampleName, midiLabel, colour, running, recording, bouncing,
-  holdProps, onPower, onToggleRecord, onBounce, onSampleFile,
+  holdProps, onMarkDoubleClick, snapshotState, onPower, onToggleRecord, onBounce, onSampleFile,
 }: AppHeaderProps): JSX.Element {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -35,10 +39,19 @@ export function AppHeader({
           type="button"
           aria-label="SIGIL"
           className="flex items-center bg-transparent border-0 p-0"
+          onDoubleClick={onMarkDoubleClick}
           {...holdProps}
         >
           <SigilWordmark size={21} />
         </button>
+        {snapshotState !== null && (
+          <span
+            className="border-[2px] px-1.5 py-0.5 text-[9px] font-bold tracking-[0.16em]"
+            style={{ borderColor: colour, color: colour }}
+          >
+            {snapshotState}
+          </span>
+        )}
         <span className="label">{engineName}</span>
         {sampleName && (
           <span className="label" style={{ color: colour }}>◆ {sampleName}</span>

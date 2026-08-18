@@ -5,6 +5,8 @@ import { useCallback, useRef, useState, type JSX } from 'react';
 export interface ParamRowProps {
   name: string;
   value: number;
+  /** Shift-click the readout to return here — the DAW convention. */
+  defaultValue?: number;
   min: number;
   max: number;
   unit: string;
@@ -34,7 +36,7 @@ function fromNorm(norm: number, min: number, max: number, curve: string): number
  * typing is for finishing.
  */
 export function ParamRow({
-  name, value, min, max, unit, curve, explain, colour, onChange,
+  name, value, defaultValue, min, max, unit, curve, explain, colour, onChange,
 }: ParamRowProps): JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -114,8 +116,16 @@ export function ParamRow({
             type="button"
             className="w-20 shrink-0 text-right text-xs font-bold tabular-nums"
             style={{ color: colour }}
-            aria-label={`Edit ${name} value`}
-            onClick={(): void => { setDraft(value.toPrecision(4)); setEditing(true); }}
+            aria-label={`Edit ${name} value. Shift-click to reset to default.`}
+            title="Click to type a value · Shift-click to reset to default"
+            onClick={(e): void => {
+              if (e.shiftKey && defaultValue !== undefined) {
+                onChange(defaultValue);
+                return;
+              }
+              setDraft(value.toPrecision(4));
+              setEditing(true);
+            }}
           >
             {value >= 1000 ? value.toFixed(0) : value.toPrecision(3)}
             <span className="label ml-1">{unit === 'none' ? '' : unit}</span>

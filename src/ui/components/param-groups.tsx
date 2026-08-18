@@ -41,6 +41,7 @@ export function ParamGroups({
                 key={p.id}
                 name={p.name}
                 value={values[i] ?? p.default}
+                defaultValue={p.default}
                 min={p.min}
                 max={p.max}
                 unit={p.unit}
