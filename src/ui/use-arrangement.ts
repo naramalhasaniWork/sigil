@@ -1,144 +1,147 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SerialisedPatch } from '@/audio/patch-format';
+import { loadArrangement, serialiseArrangement } from '@/audio/arrangement-format';
 import type { ScaleName } from '@/dsp/chords';
 import { PPQ } from '@/dsp/sequencer';
-import { DEFAULT_ENGINE_ID, ENGINES, engineById } from '@/dsp/registry';
-import { clampBars, type TimelineCell, type TimelineSection, type TimelineTrack } from './timeline-geometry';
+import { DEFAULT_ENGINE_ID, engineById } from '@/dsp/registry';
+import type { PlaybackSong } from '@/dsp/song-schedule';
+import * as A from '@/dsp/arrangement';
+import type {
+  Arrangement, ClipRecord, NoteRecord, PatternRecord, SectionRecord, SerialisedArrangement,
+} from '@/dsp/arrangement';
+import { cellViews, playbackSong, sectionViews, trackViews } from './arrangement-views';
+import type { TimelineCell, TimelineSection, TimelineTrack } from './timeline-geometry';
 
-/*
- * TODO(arrangement-format): these records are the shape agreed in
- * docs/design/arrangement-ia.md §3.3 and belong in src/audio/arrangement-format.ts —
- * pure, portable, and the file that ports to C++. That module is not written yet,
- * so they are declared here to keep this hook compiling. When it lands, delete
- * this block and import the types; the shapes are deliberately identical, and
- * `load()` below should delegate to its `loadArrangement()` recovery table rather
- * than keep the deliberately thin version at the bottom of this file.
+/**
+ * The arrangement, and nothing else. Every mutation lands here; the maths and
+ * the recovery rules live in src/dsp/arrangement.ts and
+ * src/audio/arrangement-format.ts, which are pure, portable and already tested.
+ * This file owns only what a hook can own — React state, selection, the view
+ * models and persistence.
+ *
+ * Audio nodes are not here (the instrument owns the one live host), the loop
+ * pedal is not here (use-sequencer.ts), and the clock is not here
+ * (use-arrangement-playback.ts). Components take props and hand back ids.
  */
-export const ARRANGEMENT_FORMAT_VERSION = 1;
-/** 11.5 MB of capture buffer per worklet node at 48kHz. The cap is a design. */
-export const MAX_TRACKS = 8;
 
-export interface TempoSpec { bpm: number; beatsPerBar: number; ppq: number }
-export interface KeySpec { root: number; scale: ScaleName }
-export interface SectionRecord { id: string; name: string; bars: number; repeats?: number; colour?: string }
-export interface TrackRecord {
-  id: string; name: string; engineId: string; patch?: SerialisedPatch; presetId?: string;
-  gain?: number; pan?: number; muted?: boolean; soloed?: boolean; colour?: string; sampleRef?: string;
-}
-export interface NoteRecord {
-  id: string; midi: number; velocity: number; startTick: number; durationTicks: number; pass?: number;
-}
-export interface PatternRecord {
-  id: string; name?: string; lengthBars: number; beatsPerBar: number; ppq: number;
+export const MAX_TRACKS = A.MAX_TRACKS;
+
+/**
+ * Written on every change; the old `sigil.session.v2` key is deliberately left
+ * where it is, so a rollback does not eat anyone's sound (IA section 2.6).
+ */
+const ARRANGEMENT_KEY = 'sigil.arrangement.v1';
+
+export type Scope = 'sound' | 'song';
+
+export interface CellRef { trackId: string; sectionId: string }
+
+/** What the loop pedal hands over when a pass is captured. */
+export interface CapturedPattern {
+  lengthBars: number;
+  beatsPerBar: number;
   notes: readonly NoteRecord[];
-}
-export interface ClipRecord {
-  id: string; trackId: string; sectionId: string; patternId: string;
-  fill?: 'loop' | 'once'; transpose?: number; velocityScale?: number; muted?: boolean;
-}
-export interface SerialisedArrangement {
-  version: number; id: string; name: string; savedAt?: string;
-  tempo: TempoSpec; key: KeySpec;
-  sections: readonly SectionRecord[];
-  tracks: readonly TrackRecord[];
-  patterns: Readonly<Record<string, PatternRecord>>;
-  clips: readonly ClipRecord[];
-  master?: { gain?: number };
-  meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface ArrangementController {
-  arrangement: SerialisedArrangement;
-  scope: 'sound' | 'song'; setScope: (s: 'sound' | 'song') => void;
+  arrangement: Arrangement;
+  scope: Scope; setScope: (s: Scope) => void;
   selectedTrackId: string; selectTrack: (id: string) => void;
-  selectedCell: { trackId: string; sectionId: string } | null;
+  selectedCell: CellRef | null;
   selectCell: (trackId: string, sectionId: string) => void;
+
   addTrack: (engineId: string) => string | null;
   removeTrack: (id: string) => void;
   renameTrack: (id: string, name: string) => void;
   setTrackGain: (id: string, gain: number) => void;
   toggleMute: (id: string) => void;
   toggleSolo: (id: string) => void;
-  addSection: (afterId: string | null) => string;
-  editSection: (id: string, patch: Partial<SectionRecord>) => void;
+  /** Changing a track's engine keeps its notes — notes are pitches. */
+  setTrackEngine: (id: string, engineId: string) => void;
+  setTrackPatch: (id: string, patch: SerialisedPatch) => void;
+
+  addSection: (afterId: string | null) => string | null;
+  editSection: (id: string, patch: Partial<Omit<SectionRecord, 'id'>>) => void;
   removeSection: (id: string) => void;
-  placeClip: (trackId: string, sectionId: string, patternId: string) => void;
+
+  /** The loop pedal's landing point: pattern and clip, in one gesture. */
+  captureLoop: (trackId: string, sectionId: string, pattern: CapturedPattern) => void;
+  /** One tap, one note, creating the clip if the cell is empty. */
+  addNote: (trackId: string, sectionId: string, midi: number) => void;
   moveClip: (clipId: string, toTrackId: string, toSectionId: string) => void;
   clearCell: (trackId: string, sectionId: string) => void;
   setClipTranspose: (clipId: string, semitones: number) => void;
+  clipAt: (trackId: string, sectionId: string) => ClipRecord | null;
+
   setTempo: (bpm: number) => void;
   setKey: (root: number, scale: ScaleName) => void;
+
   save: () => SerialisedArrangement;
   load: (raw: unknown) => string[];
   warnings: readonly string[];
-  /** View models for the timeline. Components never derive these themselves. */
+  note: (message: string) => void;
+
   sectionViews: readonly TimelineSection[];
   trackViews: readonly TimelineTrack[];
   cells: Readonly<Record<string, Readonly<Record<string, TimelineCell>>>>;
+  song: PlaybackSong;
   remainingSlots: number;
 }
 
-const DEFAULT_GAIN = 0.8;
-/** Two notes a beat reads as "busy"; the fill is an impression, not a piano roll. */
-const DENSE_NOTES_PER_BEAT = 2;
-
-function clamp(v: number, lo: number, hi: number): number {
-  return !Number.isFinite(v) ? lo : v < lo ? lo : v > hi ? hi : v;
-}
-
 /**
- * Slug ids, never UUIDs — and enforced here at generation, not just documented.
- * The MCP consumer is a language model: it can refer back to `track_bass` from
- * three messages ago and it cannot refer to `a7f3c2e1-…`, so if the web UI
- * quietly minted UUIDs the composition path would degrade in silence.
+ * First run: one track named Scratch, one section. SOUND scope then renders
+ * precisely today's app, and the thing becomes a song at exactly one gesture —
+ * + TRACK — and not before.
  */
-export function slugId(prefix: string, name: string, taken: ReadonlySet<string>): string {
-  const base = `${prefix}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`
-    || `${prefix}_x`;
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n++) if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
+export function initialArrangement(): Arrangement {
+  const base = A.createArrangement({ name: 'Untitled', tempo: { bpm: 96, beatsPerBar: 4 } });
+  const added = A.addTrack(base, { name: 'Scratch', engineId: DEFAULT_ENGINE_ID });
+  return added.ok ? added.arrangement : base;
 }
 
-function colourOf(engineId: string): string {
-  return engineById(engineId)?.descriptor.colour ?? 'var(--muted)';
-}
-
-export function createArrangement(): SerialisedArrangement {
-  return {
-    version: ARRANGEMENT_FORMAT_VERSION,
-    id: 'song_untitled',
-    name: 'Untitled',
-    tempo: { bpm: 96, beatsPerBar: 4, ppq: PPQ },
-    key: { root: 0, scale: 'minor' },
-    // One track, one section: today's SIGIL exactly. It becomes a song at one
-    // gesture (+ TRACK) and not before.
-    sections: [{ id: 'sec_a', name: 'A', bars: 8 }],
-    tracks: [{ id: 'track_scratch', name: 'Scratch', engineId: DEFAULT_ENGINE_ID, gain: DEFAULT_GAIN }],
-    patterns: {},
-    clips: [],
-  };
-}
-
-/**
- * The arrangement, and nothing else. Every mutation is here; components take
- * props and hand back ids. Audio nodes belong to TrackPool, the loop belongs to
- * useSequencer, and neither of them lives in this file.
- */
 export function useArrangement(
   options: { soundingClipIds?: ReadonlySet<string> } = {},
 ): ArrangementController {
-  const { soundingClipIds } = options;
-  const [arrangement, setArrangement] = useState<SerialisedArrangement>(createArrangement);
-  const [scope, setScope] = useState<'sound' | 'song'>('sound');
-  const [selectedTrackId, setSelectedTrackId] = useState<string>(() => 'track_scratch');
-  const [selectedCell, setSelectedCell] = useState<{ trackId: string; sectionId: string } | null>(null);
+  const [arrangement, setArrangement] = useState<Arrangement>(initialArrangement);
+  const [scope, setScope] = useState<Scope>('sound');
+  const [selectedTrackId, setSelectedTrackId] = useState<string>(
+    () => arrangement.tracks[0]?.id ?? '',
+  );
+  const [selectedCell, setSelectedCell] = useState<CellRef | null>(null);
   const [warnings, setWarnings] = useState<readonly string[]>([]);
+  /*
+   * State, not a ref. A ref set inside the restore effect is already true by
+   * the time the persist effect runs on the SAME mount pass — and that effect
+   * still closes over the pre-restore arrangement, so it wrote the empty
+   * default straight over the song that had just been read back.
+   */
+  const [restored, setRestored] = useState(false);
 
-  const edit = useCallback((fn: (a: SerialisedArrangement) => SerialisedArrangement): void => {
+  const note = useCallback((message: string): void => {
+    setWarnings((w) => [...w.slice(-8), message]);
+  }, []);
+
+  /** Applies a pure transform. `null` from the transform means "refused". */
+  const edit = useCallback((fn: (a: Arrangement) => Arrangement): void => {
     setArrangement((a) => fn(a));
   }, []);
+
+  const tryEdit = useCallback((fn: (a: Arrangement) => A.AddResult): string | null => {
+    let created: string | null = null;
+    let refused: string | null = null;
+    setArrangement((a) => {
+      const result = fn(a);
+      if (!result.ok) { refused = result.reason; return a; }
+      created = result.id;
+      return result.arrangement;
+    });
+    if (refused !== null) note(refused);
+    return created;
+  }, [note]);
+
+  // ---- selection ---------------------------------------------------------
 
   const selectTrack = useCallback((id: string): void => {
     setSelectedTrackId(id);
@@ -150,222 +153,238 @@ export function useArrangement(
     setSelectedCell({ trackId, sectionId });
   }, []);
 
+  // ---- tracks ------------------------------------------------------------
+
   const addTrack = useCallback((engineId: string): string | null => {
-    let created: string | null = null;
-    edit((a) => {
-      if (a.tracks.length >= MAX_TRACKS) return a;
-      // One sampler track per song: setActiveSample is a module-level global in
-      // the worklet bundle, so two sampler nodes cannot hold different samples.
-      const sampler = engineId === 'sampler' && a.tracks.some((t) => t.engineId === 'sampler');
-      const name = engineById(engineId)?.descriptor.name ?? 'Track';
-      const id = slugId('track', name, new Set(a.tracks.map((t) => t.id)));
-      created = id;
-      const track: TrackRecord = { id, name, engineId: sampler ? DEFAULT_ENGINE_ID : engineId, gain: DEFAULT_GAIN };
-      if (sampler) setWarnings((w) => [...w, 'Only one sampler track per song — added an analog track instead.']);
-      return { ...a, tracks: [...a.tracks, track] };
-    });
-    return created;
-  }, [edit]);
+    const name = engineById(engineId)?.descriptor.name ?? 'Track';
+    const id = tryEdit((a) => A.addTrack(a, { name, engineId }));
+    if (id !== null) setSelectedTrackId(id);
+    return id;
+  }, [tryEdit]);
 
   const removeTrack = useCallback((id: string): void => {
-    edit((a) => (a.tracks.length <= 1 ? a : {
-      ...a,
-      tracks: a.tracks.filter((t) => t.id !== id),
-      clips: a.clips.filter((c) => c.trackId !== id),
-    }));
-    setSelectedTrackId((cur) => (cur === id ? 'track_scratch' : cur));
-  }, [edit]);
-
-  const patchTrack = useCallback((id: string, patch: Partial<TrackRecord>): void => {
-    edit((a) => ({ ...a, tracks: a.tracks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
-  }, [edit]);
+    edit((a) => (a.tracks.length <= 1 ? a : A.removeTrack(a, id)));
+    setSelectedTrackId((cur) => {
+      if (cur !== id) return cur;
+      const next = arrangement.tracks.find((t) => t.id !== id);
+      return next?.id ?? cur;
+    });
+  }, [edit, arrangement.tracks]);
 
   const renameTrack = useCallback((id: string, name: string): void => {
-    patchTrack(id, { name: name.trim() === '' ? 'Track' : name });
-  }, [patchTrack]);
+    edit((a) => A.renameTrack(a, id, name.trim() === '' ? 'Track' : name));
+  }, [edit]);
 
   const setTrackGain = useCallback((id: string, gain: number): void => {
-    patchTrack(id, { gain: clamp(gain, 0, 1) });
-  }, [patchTrack]);
+    edit((a) => A.setTrackGain(a, id, gain));
+  }, [edit]);
 
   const toggleMute = useCallback((id: string): void => {
-    edit((a) => ({ ...a, tracks: a.tracks.map((t) => (t.id === id ? { ...t, muted: t.muted !== true } : t)) }));
+    edit((a) => A.setTrackMuted(a, id, a.tracks.find((t) => t.id === id)?.muted !== true));
   }, [edit]);
 
-  /** Solo is a radio, not a checkbox — multi-solo is a mixing workflow. */
   const toggleSolo = useCallback((id: string): void => {
+    edit((a) => A.setSolo(a, a.tracks.find((t) => t.id === id)?.soloed === true ? null : id));
+  }, [edit]);
+
+  const setTrackEngine = useCallback((id: string, engineId: string): void => {
     edit((a) => {
-      const on = a.tracks.find((t) => t.id === id)?.soloed === true;
-      return { ...a, tracks: a.tracks.map((t) => ({ ...t, soloed: !on && t.id === id })) };
+      const track = a.tracks.find((t) => t.id === id);
+      if (track === undefined || track.engineId === engineId) return a;
+      if (engineId === A.SAMPLER_ENGINE_ID
+        && a.tracks.some((t) => t.id !== id && t.engineId === A.SAMPLER_ENGINE_ID)) return a;
+      // The patch belonged to the old engine; it cannot describe the new one.
+      return {
+        ...a,
+        tracks: a.tracks.map((t) => {
+          if (t.id !== id) return t;
+          const { patch: _patch, presetId: _presetId, ...rest } = t;
+          return { ...rest, engineId };
+        }),
+      };
     });
   }, [edit]);
 
-  const addSection = useCallback((afterId: string | null): string => {
-    let created = '';
-    edit((a) => {
-      const taken = new Set(a.sections.map((s) => s.id));
-      const id = slugId('sec', `s${a.sections.length + 1}`, taken);
-      created = id;
-      const at = afterId === null ? a.sections.length : a.sections.findIndex((s) => s.id === afterId) + 1;
-      const next = [...a.sections];
-      next.splice(at <= 0 ? a.sections.length : at, 0, { id, name: `S${a.sections.length + 1}`, bars: 8 });
-      return { ...a, sections: next };
-    });
-    return created;
+  const setTrackPatch = useCallback((id: string, patch: SerialisedPatch): void => {
+    edit((a) => ({ ...a, tracks: a.tracks.map((t) => (t.id === id ? { ...t, patch } : t)) }));
   }, [edit]);
 
-  const editSection = useCallback((id: string, patch: Partial<SectionRecord>): void => {
-    edit((a) => ({
-      ...a,
-      sections: a.sections.map((s) => (s.id === id
-        ? { ...s, ...patch, bars: clampBars(patch.bars ?? s.bars) }
-        : s)),
-    }));
-  }, [edit]);
+  // ---- sections ----------------------------------------------------------
+
+  const addSection = useCallback((afterId: string | null): string | null => (
+    tryEdit((a) => A.addSection(a, afterId, { name: `S${a.sections.length + 1}`, bars: 4 }))
+  ), [tryEdit]);
+
+  const editSection = useCallback(
+    (id: string, patch: Partial<Omit<SectionRecord, 'id'>>): void => {
+      edit((a) => A.editSection(a, id, patch));
+    }, [edit]);
 
   const removeSection = useCallback((id: string): void => {
-    edit((a) => (a.sections.length <= 1 ? a : {
-      ...a,
-      sections: a.sections.filter((s) => s.id !== id),
-      clips: a.clips.filter((c) => c.sectionId !== id),
-    }));
+    edit((a) => (a.sections.length <= 1 ? a : A.removeSection(a, id)));
     setSelectedCell((cell) => (cell?.sectionId === id ? null : cell));
   }, [edit]);
 
-  const placeClip = useCallback((trackId: string, sectionId: string, patternId: string): void => {
+  // ---- clips -------------------------------------------------------------
+
+  /**
+   * A cell owns its loop, so the pattern id is derived from the cell rather
+   * than minted. Re-recording overwrites what is there and never reaches into a
+   * pattern some other clip is also playing.
+   */
+  const captureLoop = useCallback((
+    trackId: string, sectionId: string, spec: CapturedPattern,
+  ): void => {
     edit((a) => {
-      const taken = new Set(a.clips.map((c) => c.id));
-      const id = slugId('clip', `${trackId}_${sectionId}`, taken);
-      const kept = a.clips.filter((c) => !(c.trackId === trackId && c.sectionId === sectionId));
-      return { ...a, clips: [...kept, { id, trackId, sectionId, patternId }] };
+      if (!a.tracks.some((t) => t.id === trackId)) return a;
+      if (!a.sections.some((s) => s.id === sectionId)) return a;
+      const patternId = `pat_${trackId}_${sectionId}`;
+      const empty: PatternRecord = {
+        id: patternId,
+        lengthBars: Math.max(1, Math.round(spec.lengthBars)),
+        beatsPerBar: Math.max(1, Math.round(spec.beatsPerBar)),
+        ppq: PPQ,
+        notes: [],
+      };
+      const filled = A.normalisePatternNotes(empty, spec.notes);
+      const next: Arrangement = { ...a, patterns: { ...a.patterns, [patternId]: filled } };
+      const here = next.clips.find((c) => c.trackId === trackId && c.sectionId === sectionId);
+      if (here?.patternId === patternId) return next;
+      const placed = A.placeClip(next, trackId, sectionId, patternId);
+      return placed.ok ? placed.arrangement : next;
+    });
+  }, [edit]);
+
+  /**
+   * Put a single note in a cell.
+   *
+   * The loop pedal is the way parts get recorded, but "I just want one note
+   * there" should not need a round trip through the keyboard and a take. This
+   * drops the note on the next free beat of the cell's own pattern, creating
+   * both the pattern and the clip if the cell is empty, so an empty grid can be
+   * filled by tapping.
+   */
+  const addNote = useCallback((trackId: string, sectionId: string, midi: number): void => {
+    edit((a) => {
+      if (!a.tracks.some((t) => t.id === trackId)) return a;
+      if (!a.sections.some((s) => s.id === sectionId)) return a;
+      const here = a.clips.find((c) => c.trackId === trackId && c.sectionId === sectionId);
+      const fallbackId = `pat_${trackId}_${sectionId}`;
+      const base: PatternRecord = (here === undefined ? undefined : a.patterns[here.patternId])
+        ?? {
+          id: fallbackId,
+          lengthBars: 1,
+          beatsPerBar: a.tempo.beatsPerBar,
+          ppq: PPQ,
+          notes: [],
+        };
+      const beat = base.ppq;
+      const slots = Math.max(1, Math.round(A.patternTicksOf(base) / beat));
+      const used = new Set(base.notes.map((n) => Math.floor(n.startTick / beat)));
+      let slot = 0;
+      while (slot < slots && used.has(slot)) slot += 1;
+      // A full bar stacks the next note on the downbeat rather than refusing:
+      // refusing to add a note is a dead end, a chord is not.
+      if (slot >= slots) slot = 0;
+      const note: NoteRecord = {
+        id: `n_${slot}_${midi}_${base.notes.length}`,
+        midi: Math.round(midi),
+        velocity: 0.9,
+        startTick: slot * beat,
+        durationTicks: beat,
+        pass: 0,
+      };
+      const filled = A.normalisePatternNotes(base, [...base.notes, note]);
+      const next: Arrangement = { ...a, patterns: { ...a.patterns, [filled.id]: filled } };
+      if (here !== undefined) return next;
+      const placed = A.placeClip(next, trackId, sectionId, filled.id);
+      return placed.ok ? placed.arrangement : next;
     });
   }, [edit]);
 
   const moveClip = useCallback((clipId: string, toTrackId: string, toSectionId: string): void => {
-    edit((a) => {
-      const moving = a.clips.find((c) => c.id === clipId);
-      if (moving === undefined) return a;
-      const kept = a.clips.filter((c) => c.id !== clipId
-        && !(c.trackId === toTrackId && c.sectionId === toSectionId));
-      return { ...a, clips: [...kept, { ...moving, trackId: toTrackId, sectionId: toSectionId }] };
-    });
+    edit((a) => A.moveClip(a, clipId, toTrackId, toSectionId));
   }, [edit]);
 
   const clearCell = useCallback((trackId: string, sectionId: string): void => {
-    edit((a) => ({
-      ...a,
-      clips: a.clips.filter((c) => !(c.trackId === trackId && c.sectionId === sectionId)),
-    }));
+    edit((a) => A.clearCell(a, trackId, sectionId));
   }, [edit]);
 
   const setClipTranspose = useCallback((clipId: string, semitones: number): void => {
-    edit((a) => ({
-      ...a,
-      clips: a.clips.map((c) => (c.id === clipId
-        ? { ...c, transpose: Math.round(clamp(semitones, -24, 24)) }
-        : c)),
-    }));
+    edit((a) => A.setClipTranspose(a, clipId, semitones));
   }, [edit]);
 
+  const clipAt = useCallback((trackId: string, sectionId: string): ClipRecord | null => (
+    arrangement.clips.find((c) => c.trackId === trackId && c.sectionId === sectionId) ?? null
+  ), [arrangement.clips]);
+
+  // ---- song --------------------------------------------------------------
+
   const setTempo = useCallback((bpm: number): void => {
-    edit((a) => ({ ...a, tempo: { ...a.tempo, bpm: clamp(Math.round(bpm), 20, 300) } }));
+    edit((a) => A.setTempo(a, bpm));
   }, [edit]);
 
   const setKey = useCallback((root: number, scale: ScaleName): void => {
-    edit((a) => ({ ...a, key: { root: ((Math.round(root) % 12) + 12) % 12, scale } }));
+    edit((a) => A.setKey(a, root, scale));
   }, [edit]);
 
-  /** Deterministic ordering, so two saves of one song produce identical JSON. */
-  const save = useCallback((): SerialisedArrangement => ({
-    ...arrangement,
-    savedAt: new Date().toISOString(),
-    patterns: Object.fromEntries(Object.entries(arrangement.patterns).sort(([a], [b]) => (a < b ? -1 : 1))),
-    clips: [...arrangement.clips].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
-  }), [arrangement]);
+  const save = useCallback((): SerialisedArrangement => serialiseArrangement(arrangement), [arrangement]);
 
-  /*
-   * Deliberately thin. The exhaustive recovery table — unknown engines kept and
-   * flagged, unknown keys preserved into `meta`, ppq rescaling, quarantined
-   * clips — belongs to loadArrangement() in arrangement-format.ts, which is not
-   * written yet. This does the shape check and the referential integrity pass so
-   * a load cannot leave a clip pointing at a track that is not there, and warns
-   * about everything it touches rather than swallowing it.
-   */
   const load = useCallback((raw: unknown): string[] => {
-    if (typeof raw !== 'object' || raw === null) return ['Not an arrangement.'];
-    const it = raw as Partial<SerialisedArrangement>;
-    if (!Array.isArray(it.sections) || !Array.isArray(it.tracks)) return ['Not an arrangement.'];
-    const found: string[] = [];
-    if ((it.version ?? 0) > ARRANGEMENT_FORMAT_VERSION) found.push('Saved by a newer build — loading what is understood.');
-    const tracks = it.tracks.slice(0, MAX_TRACKS);
-    if (it.tracks.length > tracks.length) found.push(`Past the ${MAX_TRACKS}-track cap — ${it.tracks.length - tracks.length} not loaded.`);
-    const trackIds = new Set(tracks.map((t) => t.id));
-    const sectionIds = new Set(it.sections.map((s) => s.id));
-    const clips = (it.clips ?? []).filter((c) => trackIds.has(c.trackId) && sectionIds.has(c.sectionId));
-    if ((it.clips ?? []).length !== clips.length) found.push(`${(it.clips ?? []).length - clips.length} clip(s) pointed at nothing and were dropped.`);
-    const base = createArrangement();
-    const next: SerialisedArrangement = {
-      ...base, ...it,
-      sections: it.sections.map((s) => ({ ...s, bars: clampBars(s.bars) })),
-      tracks, clips, patterns: it.patterns ?? {},
-    };
-    setArrangement(next);
-    setSelectedTrackId(tracks[0]?.id ?? base.tracks[0]?.id ?? '');
+    const result = loadArrangement(raw);
+    if (result === null) return ['That does not look like a SIGIL song.'];
+    setArrangement(result.arrangement);
+    setSelectedTrackId(result.arrangement.tracks[0]?.id ?? '');
     setSelectedCell(null);
-    setWarnings(found);
-    return found;
+    setWarnings(result.warnings);
+    return result.warnings;
   }, []);
 
-  const sectionViews = useMemo<readonly TimelineSection[]>(
-    () => arrangement.sections.map((s) => ({ id: s.id, name: s.name, bars: s.bars, repeats: s.repeats })),
-    [arrangement.sections],
-  );
+  // ---- persistence -------------------------------------------------------
 
-  const trackViews = useMemo<readonly TimelineTrack[]>(() => arrangement.tracks.map((t) => ({
-    id: t.id,
-    name: t.name,
-    engineId: t.engineId,
-    colour: colourOf(t.engineId),
-    gain: t.gain ?? DEFAULT_GAIN,
-    muted: t.muted === true,
-    soloed: t.soloed === true,
-    unplayable: engineById(t.engineId) === undefined ? true : undefined,
-  })), [arrangement.tracks]);
-
-  const cells = useMemo(() => {
-    const { beatsPerBar } = arrangement.tempo;
-    const out: Record<string, Record<string, TimelineCell>> = {};
-    for (const track of arrangement.tracks) {
-      const row: Record<string, TimelineCell> = {};
-      for (const section of arrangement.sections) {
-        const clip = arrangement.clips.find((c) => c.trackId === track.id && c.sectionId === section.id);
-        const pattern = clip === undefined ? undefined : arrangement.patterns[clip.patternId];
-        const beats = Math.max(1, (pattern?.lengthBars ?? 1) * (pattern?.beatsPerBar ?? beatsPerBar));
-        const noteCount = pattern?.notes.length ?? 0;
-        row[section.id] = {
-          clipId: clip?.id ?? null,
-          noteCount,
-          density: clamp(noteCount / (beats * DENSE_NOTES_PER_BEAT), 0, 1),
-          muted: track.muted === true || clip?.muted === true,
-          playing: clip !== undefined && soundingClipIds?.has(clip.id) === true,
-        };
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(ARRANGEMENT_KEY);
+      if (raw !== null) {
+        const result = loadArrangement(JSON.parse(raw));
+        if (result !== null && result.arrangement.tracks.length > 0) {
+          setArrangement(result.arrangement);
+          setSelectedTrackId(result.arrangement.tracks[0]?.id ?? '');
+          if (result.warnings.length > 0) setWarnings(result.warnings);
+        }
       }
-      out[track.id] = row;
+    } catch {
+      // A corrupt song must never stop the instrument from opening.
     }
-    return out;
-  }, [arrangement, soundingClipIds]);
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      window.localStorage.setItem(ARRANGEMENT_KEY, JSON.stringify(serialiseArrangement(arrangement)));
+    } catch {
+      // Storage full or blocked in private browsing. Playing continues.
+    }
+  }, [arrangement, restored]);
+
+  // ---- view models -------------------------------------------------------
+
+  const sounding = options.soundingClipIds;
+  const sections = useMemo(() => sectionViews(arrangement), [arrangement]);
+  const tracks = useMemo(() => trackViews(arrangement), [arrangement]);
+  const cells = useMemo(
+    () => cellViews(arrangement, sounding ?? new Set<string>()), [arrangement, sounding]);
+  const song = useMemo(() => playbackSong(arrangement), [arrangement]);
 
   return {
     arrangement, scope, setScope, selectedTrackId, selectTrack, selectedCell, selectCell,
     addTrack, removeTrack, renameTrack, setTrackGain, toggleMute, toggleSolo,
+    setTrackEngine, setTrackPatch,
     addSection, editSection, removeSection,
-    placeClip, moveClip, clearCell, setClipTranspose, setTempo, setKey,
-    save, load, warnings,
-    sectionViews, trackViews, cells,
-    remainingSlots: Math.max(0, MAX_TRACKS - arrangement.tracks.length),
+    captureLoop, addNote, moveClip, clearCell, setClipTranspose, clipAt,
+    setTempo, setKey, save, load, warnings, note,
+    sectionViews: sections, trackViews: tracks, cells, song,
+    remainingSlots: Math.max(0, A.MAX_TRACKS - arrangement.tracks.length),
   };
 }
-
-/** Engine choices for a new track, in registry order. Colour travels as a prop. */
-export const TRACK_ENGINE_CHOICES: readonly { id: string; name: string; colour: string }[] =
-  ENGINES.map((e) => ({ id: e.descriptor.id, name: e.descriptor.name, colour: e.descriptor.colour }));

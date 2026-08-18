@@ -25,6 +25,8 @@ export interface ClipBlockProps {
   selected: boolean;
   /** This block is the one being dragged: it goes ghost, the preview leads. */
   dragging: boolean;
+  /** A clip is looking for a home and this cell is a legal landing spot. */
+  targeted: boolean;
   /** "Bass · drop" — the whole label a screen reader gets. */
   label: string;
   onSelect: () => void;
@@ -35,6 +37,16 @@ export interface ClipBlockProps {
 /** Below this a note count is unreadable and the block is better left a block. */
 const COUNT_MIN_WIDTH = 64;
 const INSET = 3;
+/** Below this the plus is bigger than the cell and reads as noise. */
+const PLUS_MIN_WIDTH = 34;
+/**
+ * The ruled table. An empty cell used to be `transparent` on a --bg lane with a
+ * --bg column rule, which is to say invisible: there was nothing to tell you a
+ * cell existed, let alone that you could put something in it. It now carries a
+ * real border and a plus, because a drop target you cannot see is not one.
+ */
+const RULE = 'var(--ink)';
+const EMPTY_RULE = '#494640';
 
 /**
  * One cell of the song table.
@@ -44,11 +56,20 @@ const INSET = 3;
  * editing at all: notes get in by being played, and out with UNDO PASS or CLEAR.
  */
 export function ClipBlock({
-  cell, x, width, height, colour, selected, dragging, label, onSelect, onClear, onDragStart,
+  cell, x, width, height, colour, selected, dragging, targeted, label,
+  onSelect, onClear, onDragStart,
 }: ClipBlockProps): JSX.Element {
   const empty = cell.clipId === null;
-  const face = cell.muted ? 'var(--muted)' : colour;
+  const face = cell.muted ? 'var(--ink)' : colour;
   const fill = Math.max(4, Math.round(cell.density * Math.max(0, height - INSET * 2 - 6)));
+
+  const outline = targeted
+    ? 'inset 0 0 0 3px var(--physical)'
+    : selected
+      ? 'inset 0 0 0 3px var(--ink)'
+      : empty
+        ? `inset 0 0 0 3px ${EMPTY_RULE}`
+        : `inset 0 0 0 3px ${face}`;
 
   return (
     <button
@@ -65,9 +86,20 @@ export function ClipBlock({
         border: 0,
         borderRadius: 0,
         // The column rule lives on the block, so the lane needs no separate
-        // gridline layer and an empty cell is still a target you can hit.
-        borderRight: '3px solid var(--bg)',
-        background: empty ? 'transparent' : selected ? face : 'var(--panel)',
+        // gridline layer and an empty cell is still a target you can hit. It is
+        // drawn in --ink: on a --bg lane, a --bg rule is not a rule.
+        borderRight: `3px solid ${RULE}`,
+        /*
+         * A clip is a SOLID block in its track's colour, always — not a dark
+         * panel with a hint of fill. "The grid is hard to see" was the first
+         * thing anyone said about it, and a clip you have to hunt for is not a
+         * clip. Density is drawn by masking the block DOWN from the top, so a
+         * busier part is a taller bar of colour and the reading is the same.
+         */
+        background: empty
+          ? (targeted ? 'rgba(255,217,61,0.14)' : 'var(--bg)')
+          : face,
+        boxShadow: outline,
         opacity: dragging ? 0.35 : 1,
         touchAction: 'none',
         userSelect: 'none',
@@ -87,31 +119,30 @@ export function ClipBlock({
       onDoubleClick={(e): void => { if (!empty) { e.preventDefault(); onClear(); } }}
       onContextMenu={(e): void => { e.preventDefault(); }}
     >
+      {empty && width >= PLUS_MIN_WIDTH && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 flex items-center justify-center text-[15px] font-bold leading-none"
+          style={{ color: targeted ? 'var(--physical)' : EMPTY_RULE }}
+        >
+          +
+        </span>
+      )}
       {!empty && (
         <>
           <span
             aria-hidden="true"
-            className="absolute"
+            className="absolute left-0 right-0 top-0"
             style={{
-              left: `${INSET}px`,
-              right: `${INSET + 3}px`,
-              bottom: `${INSET}px`,
-              height: `${fill}px`,
-              background: selected ? 'var(--bg)' : face,
+              height: `${Math.max(0, height - fill - INSET * 2)}px`,
+              background: 'var(--bg)',
             }}
           />
           {cell.playing && (
             <span
               aria-hidden="true"
-              className="absolute left-0 right-0 top-0"
-              style={{ height: '3px', background: 'var(--physical)' }}
-            />
-          )}
-          {selected && (
-            <span
-              aria-hidden="true"
               className="absolute inset-0"
-              style={{ boxShadow: 'inset 0 0 0 3px var(--ink)' }}
+              style={{ boxShadow: 'inset 0 0 0 3px var(--physical)' }}
             />
           )}
           {width >= COUNT_MIN_WIDTH && (
@@ -121,7 +152,7 @@ export function ClipBlock({
                 left: `${INSET + 4}px`,
                 top: `${INSET + 3}px`,
                 // --muted fails AA on panel at 9px. Ink, or the dark ground.
-                color: selected ? 'var(--bg)' : 'var(--ink)',
+                color: 'var(--ink)',
               }}
             >
               {cell.noteCount}
@@ -138,6 +169,8 @@ export interface SectionHeadProps {
   name: string;
   height: number;
   active: boolean;
+  /** The playhead is inside this section right now. */
+  playing: boolean;
   colour: string;
   onSelect: () => void;
   onGrab: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -152,7 +185,7 @@ export interface SectionHeadProps {
  * handle at all, since a clip fills the cell it is in.
  */
 export function SectionHead({
-  box, name, height, active, colour, onSelect, onGrab,
+  box, name, height, active, playing, colour, onSelect, onGrab,
 }: SectionHeadProps): JSX.Element {
   return (
     <>
@@ -166,16 +199,20 @@ export function SectionHead({
           left: `${box.x}px`,
           width: `${box.width}px`,
           height: `${height}px`,
-          borderColor: 'var(--bg)',
-          background: active ? colour : 'var(--panel)',
-          color: active ? 'var(--bg)' : 'var(--ink)',
+          borderColor: RULE,
+          background: playing ? 'var(--physical)' : active ? colour : 'var(--panel)',
+          color: playing || active ? 'var(--bg)' : 'var(--ink)',
           touchAction: 'manipulation',
           WebkitTapHighlightColor: 'transparent',
         }}
       >
         <span className="truncate text-[11px] font-bold uppercase tracking-[0.08em]">{name}</span>
-        <span className="label tabular-nums" style={{ color: active ? 'var(--bg)' : 'var(--ink)' }}>
+        <span
+          className="text-[9px] font-bold tracking-[0.14em] tabular-nums shrink-0"
+          style={{ color: playing || active ? 'var(--bg)' : 'var(--ink)' }}
+        >
           {box.bars}
+          {box.repeats > 1 ? `×${box.repeats}` : ''}
         </span>
       </button>
       <div

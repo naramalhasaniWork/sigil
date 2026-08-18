@@ -6,6 +6,7 @@ import {
 } from 'react';
 import { TrackRow } from './track-row';
 import { SectionHead } from './clip-block';
+import { NEXT_HEIGHT, TimelineHead, type TimelineHeight } from './timeline-head';
 import {
   barsFromDrag, clampBars, contentWidth, isDrag, layoutSections, playheadX, pxPerBar,
   sectionAtX, totalBars, trackAtY,
@@ -14,8 +15,7 @@ import {
 } from '@/ui/timeline-geometry';
 
 export type { TimelineSection, TimelineTrack, TimelineCell, PlayheadPosition };
-
-export type TimelineHeight = 'ribbon' | 'half' | 'full';
+export type { TimelineHeight };
 
 export interface TimelineProps {
   /** Array order IS the song. There is no separate order field. */
@@ -39,6 +39,8 @@ export interface TimelineProps {
   onToggleMute: (id: string) => void;
   onToggleSolo: (id: string) => void;
   onSetGain: (id: string, gain: number) => void;
+  /** A clip armed for tap-to-place. Every other cell becomes a landing spot. */
+  pendingClipId: string | null;
   colour: string;
 }
 
@@ -47,10 +49,6 @@ const HEAD_H = 44;
 const GUTTER_WIDE = 196;
 const GUTTER_NARROW = 152;
 const NARROW_PX = 560;
-const NEXT_HEIGHT: Readonly<Record<TimelineHeight, TimelineHeight>> = {
-  ribbon: 'half', half: 'full', full: 'ribbon',
-};
-
 interface ClipDrag {
   kind: 'clip';
   clipId: string; fromTrackId: string; fromSectionId: string;
@@ -61,31 +59,6 @@ interface ResizeDrag {
   kind: 'resize'; sectionId: string; startBars: number; startX: number; bars: number;
 }
 type Drag = ClipDrag | ResizeDrag | null;
-
-/** A square 44px action. Flat fill, hard border, no shadow inside a dense strip. */
-function Step({
-  label, glyph, onPress, wide = false,
-}: { label: string; glyph: string; onPress: () => void; wide?: boolean }): JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onPress}
-      className="shrink-0 border-[3px] text-[11px] font-bold leading-none"
-      style={{
-        minWidth: wide ? '68px' : '44px',
-        height: '44px',
-        borderColor: 'var(--ink)',
-        color: 'var(--ink)',
-        background: 'transparent',
-        touchAction: 'manipulation',
-        WebkitTapHighlightColor: 'transparent',
-      }}
-    >
-      {glyph}
-    </button>
-  );
-}
 
 /**
  * The song, seen from above.
@@ -104,7 +77,7 @@ export function Timeline({
   sections, tracks, cells, beatsPerBar, playhead, selected, selectedTrackId,
   height, onHeight, onSelectTrack, onSelectCell, onMoveClip, onClearCell,
   onAddSection, onEditSection, onRemoveSection, onToggleMute, onToggleSolo,
-  onSetGain, colour,
+  onSetGain, pendingClipId, colour,
 }: TimelineProps): JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneRef = useRef<HTMLDivElement | null>(null);
@@ -112,7 +85,6 @@ export function Timeline({
   const dragRef = useRef<Drag>(null);
   const [drag, setDrag] = useState<Drag>(null);
   const [available, setAvailable] = useState(0);
-  const [draft, setDraft] = useState<string | null>(null);
 
   const gutter = available > 0 && available < NARROW_PX ? GUTTER_NARROW : GUTTER_WIDE;
 
@@ -148,7 +120,7 @@ export function Timeline({
     return out;
   }, [sections]);
 
-  const activeId = selected?.sectionId ?? sections[0]?.id ?? null;
+  const activeId = playhead?.sectionId ?? selected?.sectionId ?? sections[0]?.id ?? null;
   const active = sections.find((s) => s.id === activeId) ?? null;
   const headX = playheadX(boxes, playhead, beatsPerBar, perBar);
 
@@ -237,61 +209,15 @@ export function Timeline({
       className="border-[3px] flex flex-col shrink-0"
       style={{ borderColor: 'var(--ink)', background: 'var(--bg)' }}
     >
-      <header
-        className="flex items-center gap-2 flex-wrap px-2 py-1 border-b-[3px]"
-        style={{ borderColor: 'var(--ink)', background: 'var(--panel)', minHeight: '44px' }}
-      >
-        <span className="label" style={{ color: 'var(--ink)' }}>Song</span>
-
-        {active !== null && (
-          <>
-            <input
-              aria-label="Section name"
-              value={draft ?? active.name}
-              onChange={(e): void => setDraft(e.target.value)}
-              onBlur={(): void => {
-                if (draft !== null && draft !== active.name) onEditSection(active.id, { name: draft });
-                setDraft(null);
-              }}
-              onKeyDown={(e): void => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-              className="w-24 border-[3px] bg-transparent px-1.5 text-[11px] font-bold uppercase tracking-[0.08em]"
-              style={{ borderColor: colour, color: 'var(--ink)', height: '44px' }}
-            />
-            <Step
-              label={`Fewer bars in ${active.name}`}
-              glyph="−"
-              onPress={(): void => onEditSection(active.id, { bars: clampBars(active.bars - 1) })}
-            />
-            <span className="label tabular-nums" style={{ color: 'var(--ink)' }}>
-              {clampBars(active.bars)} bars
-            </span>
-            <Step
-              label={`More bars in ${active.name}`}
-              glyph="+"
-              onPress={(): void => onEditSection(active.id, { bars: clampBars(active.bars + 1) })}
-            />
-            <Step
-              label={`Remove section ${active.name}`}
-              glyph="×"
-              onPress={(): void => onRemoveSection(active.id)}
-            />
-          </>
-        )}
-
-        <Step label="Add a section" glyph="+ SEC" wide onPress={(): void => onAddSection(activeId)} />
-
-        <div className="flex-1" />
-
-        <button
-          type="button"
-          aria-label={`Song view is ${height}. Tap for ${NEXT_HEIGHT[height]}.`}
-          onClick={(): void => onHeight(NEXT_HEIGHT[height])}
-          className="label px-3"
-          style={{ color: 'var(--ink)', minHeight: '44px', minWidth: '44px' }}
-        >
-          {height}
-        </button>
-      </header>
+      <TimelineHead
+        section={active}
+        height={height}
+        onHeight={onHeight}
+        onAddSection={onAddSection}
+        onEditSection={onEditSection}
+        onRemoveSection={onRemoveSection}
+        colour={colour}
+      />
 
       <div ref={scrollRef} className="overflow-x-auto" style={{ overscrollBehaviorX: 'contain' }}>
         <div className="relative" style={{ width: `${gutter + laneWidth}px` }}>
@@ -314,7 +240,8 @@ export function Timeline({
                   box={box}
                   name={names[box.id] ?? box.id}
                   height={HEAD_H}
-                  active={box.id === activeId}
+                  active={box.id === (selected?.sectionId ?? activeId)}
+                  playing={box.id === playhead?.sectionId}
                   colour={colour}
                   onSelect={(): void => onSelectCell(selectedTrackId, box.id)}
                   onGrab={(e): void => onGrab(box, e)}
@@ -341,6 +268,7 @@ export function Timeline({
                   selectedSectionId={selected?.trackId === track.id ? selected.sectionId : null}
                   dropSectionId={clipDrag?.toTrackId === track.id ? clipDrag.toSectionId : null}
                   draggingClipId={clipDrag?.clipId ?? null}
+                  pendingClipId={pendingClipId}
                   onSelectTrack={onSelectTrack}
                   onSelectCell={onSelectCell}
                   onClearCell={onClearCell}
@@ -353,16 +281,31 @@ export function Timeline({
             </div>
           )}
 
+          {/* The playhead. It was a 3px hairline and people could not find it;
+              it is now a 5px bar with a head on top, drawn over everything. */}
           {headX !== null && (
             <span
               aria-hidden="true"
               className="absolute top-0 bottom-0 z-30 pointer-events-none"
               style={{
-                left: `${gutter + Math.round(headX)}px`,
-                width: '3px',
+                left: `${gutter + Math.round(headX) - 1}px`,
+                width: '5px',
                 background: 'var(--physical)',
+                boxShadow: '0 0 0 1px var(--bg)',
               }}
-            />
+            >
+              <span
+                className="absolute left-1/2 top-0"
+                style={{
+                  width: 0,
+                  height: 0,
+                  transform: 'translateX(-50%)',
+                  borderLeft: '7px solid transparent',
+                  borderRight: '7px solid transparent',
+                  borderTop: '9px solid var(--physical)',
+                }}
+              />
+            </span>
           )}
         </div>
       </div>

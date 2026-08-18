@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 import { ENGINES } from '@/dsp/registry';
 import { useInstrument } from '@/ui/use-instrument';
 import { useComputerKeyboard } from '@/ui/use-computer-keyboard';
@@ -31,14 +31,47 @@ import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
 import { SigilCard } from '@/ui/components/sigil-card';
+import { ScopeSwitch } from '@/ui/components/scope-switch';
+import { TrackRail } from '@/ui/components/track-rail';
+import { LoopStrip } from '@/ui/components/loop-strip';
+import { CellStrip } from '@/ui/components/cell-strip';
+import { NotePicker } from '@/ui/components/note-picker';
+import { SongPane } from '@/ui/components/song-pane';
+import type { TimelineHeight } from '@/ui/components/timeline';
+import { useSong } from '@/ui/use-song';
 
 type View = 'sculpt' | 'deep' | 'fx' | 'hunt' | 'export' | 'setup';
 
 export default function Page(): JSX.Element {
   const inst = useInstrument();
+  const song = useSong(inst);
   const [view, setView] = useState<View>('sculpt');
   const [octave, setOctave] = useState(4);
   const scaleState = useScaleState();
+
+  const songScope = song.arr.scope === 'song';
+
+  /*
+   * The grid has three heights and one chevron, no drag handle. A phone opens
+   * at RIBBON because a phone is tall and the instrument has to stay reachable;
+   * a desktop opens at HALF, so the song and the sound are visible at once.
+   */
+  const [gridHeight, setGridHeight] = useState<TimelineHeight>('half');
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 767px)').matches) setGridHeight('ribbon');
+  }, []);
+
+  /*
+   * Nothing is permanently in the way. In SONG scope the instrument tabs fold
+   * to the SIDE rather than occupying the centre, the engine rail and preset
+   * list fold away, and the keyboard folds down — each in one tap, each back in
+   * one tap.
+   */
+  const [railOpen, setRailOpen] = useState(true);
+  const [keysOpen, setKeysOpen] = useState(true);
+  const [sideOpen, setSideOpen] = useState(false);
+  /** The cell waiting for a note. Non-null means the picker is up. */
+  const [pickerCell, setPickerCell] = useState<{ trackId: string; sectionId: string } | null>(null);
 
   const colour = inst.descriptor?.colour ?? '#FF6B6B';
   const tray = useDragExport();
@@ -93,10 +126,16 @@ export default function Page(): JSX.Element {
     scale: scaleState.scale,
   }), [scaleState.mode, scaleState.root, scaleState.scale]);
 
+  /*
+   * Every note the player makes goes through the deck, not straight to the
+   * instrument: it sounds immediately AND is offered to the loop pedal, which
+   * writes it down only when REC is lit. That is the whole "hit REC, play, you
+   * have a clip" path, and it must not care which surface the note came from.
+   */
   const chordInput = useChordInput({
     config: chordConfig,
-    onNoteOn: inst.noteOn,
-    onNoteOff: inst.noteOff,
+    onNoteOn: song.noteOn,
+    onNoteOff: song.noteOff,
   });
 
   /*
@@ -152,6 +191,184 @@ export default function Page(): JSX.Element {
 
   const heldPads = useMemo(() => new Set<number>(), []);
 
+  /*
+   * The six tabs' content, declared once and rendered in exactly one place:
+   * the centre in SOUND scope, the side panel in SONG scope.
+   */
+  const tabContent = (
+    <>
+      {view === 'sculpt' && (
+        <div className="flex flex-col md:flex-row gap-5 items-start">
+          <div className="w-full max-w-[300px] shrink-0 flex flex-col gap-4">
+            <XYPad
+              xLabel={inst.macroNames[1]}
+              yLabel={inst.macroNames[0]}
+              x={inst.macros[1]}
+              y={inst.macros[0]}
+              colour={colour}
+              onChange={onXY}
+            />
+            <SigilCard
+              sigil={inst.sigil}
+              trueName={inst.trueName}
+              suggestedName={inst.suggestedName}
+              trail={inst.trail}
+              colour={colour}
+              onSave={inst.savePreset}
+            />
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col gap-5">
+            <MacroRow
+              names={inst.macroNames}
+              values={inst.macros}
+              colour={colour}
+              onChange={inst.setMacro}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="h-32">
+                <Scope analyser={inst.host?.analyser ?? null} colour={colour} />
+              </div>
+              <div className="h-32">
+                <Spectrum analyser={inst.host?.analyser ?? null} colour={colour} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'deep' && inst.descriptor && inst.values && (
+        <ParamGroups
+          descriptor={inst.descriptor}
+          values={inst.values}
+          colour={colour}
+          onChange={inst.setParam}
+        />
+      )}
+
+      {view === 'fx' && (
+        <div className="flex flex-col lg:flex-row gap-8">
+          <div className="flex-1 min-w-0">
+            <div className="label mb-3" style={{ color: colour }}>Chain</div>
+            <ParamGroups
+              descriptor={inst.fxDescriptor}
+              values={inst.fxValues}
+              colour={colour}
+              onChange={inst.setFxParam}
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="label mb-3" style={{ color: 'var(--physical)' }}>Character</div>
+            <ParamGroups
+              descriptor={inst.magicDescriptor}
+              values={inst.magicValues}
+              colour="var(--physical)"
+              onChange={inst.setMagicParam}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Mounted always, parked off-screen when elsewhere, so the camera
+          and its stream survive tab changes. */}
+      <div
+        aria-hidden={view !== 'setup'}
+        style={view === 'setup' ? undefined : {
+          position: 'fixed', left: -99999, top: 0,
+          width: 900, height: 700, overflow: 'hidden', pointerEvents: 'none',
+        }}
+      >
+        <SetupPanel
+          audioContext={inst.host?.context ?? null}
+          engineDescriptor={inst.descriptor}
+          fxDescriptor={inst.fxDescriptor}
+          magicDescriptor={inst.magicDescriptor}
+          padChords={chordConfig}
+          onPadChords={(next): void => {
+            scaleState.setMode(next.mode === 'off' ? 'notes' : 'chords');
+            scaleState.setRoot(((next.root % 12) + 12) % 12);
+            scaleState.setScale(next.scale);
+          }}
+          onParam={(address, value): void => inst.setParamByAddress(address, value)}
+          onNoteOn={chordInput.noteOn}
+          onNoteOff={chordInput.noteOff}
+          enabled={inst.started}
+          section={setupSection}
+          onSection={setSetupSection}
+          macroNames={inst.macroNames}
+          kit={kit}
+          colour={colour}
+          bouncing={inst.bouncing}
+          onRenderForKit={inst.renderCurrent}
+          onHands={onHands}
+          bounceMs={inst.bounceMs}
+          onBounceMs={inst.setBounceMs}
+        />
+      </div>
+
+      {view === 'export' && (
+        <ExportTray
+          items={tray.items}
+          dragProps={tray.dragProps}
+          onDownload={tray.download}
+          onDownloadAll={tray.downloadAll}
+          onRemove={tray.remove}
+          accent={colour}
+        />
+      )}
+
+      {view === 'hunt' && (
+        <HuntGrid
+          variations={inst.huntVariations.map((v) => ({
+            id: v.id,
+            title: v.title,
+            sigil: v.sigil,
+            changes: v.changes,
+            kept: v.kept,
+          }))}
+          auditioningId={inst.auditioningId}
+          colour={colour}
+          trail={inst.trail}
+          tasteLabels={inst.tasteLabels}
+          onAudition={inst.auditionVariation}
+          onToggleKeep={inst.toggleKeep}
+          onBreed={inst.breedKept}
+          onReroll={inst.reroll}
+          onForget={inst.forgetTaste}
+          keptCount={inst.huntVariations.filter((v) => v.kept).length}
+        />
+      )}
+    </>
+  );
+
+  const playSurface = (
+    <>
+      {keysOpen && <ScalePicker state={scaleState} colour={colour} />}
+      {keysOpen && (inst.layout === 'keys' ? (
+        <Keys
+          octave={octave}
+          held={inst.held}
+          scaleRoot={scaleState.root}
+          scale={scaleState.scale}
+          chords={scaleState.mode === 'chords'}
+          onNoteOn={chordInput.noteOn}
+          onNoteOff={chordInput.noteOff}
+        />
+      ) : (
+        <PadGrid
+          rows={4}
+          cols={4}
+          root={12 * octave + scaleState.root}
+          scale={scaleState.scale}
+          mode={scaleState.mode}
+          colour={colour}
+          onNoteOn={song.noteOn}
+          onNoteOff={song.noteOff}
+          heldPads={heldPads}
+        />
+      ))}
+    </>
+  );
+
   return (
     <main className={`min-h-screen flex flex-col ${eggs.ritualClass}`}>
       <AppHeader
@@ -177,187 +394,187 @@ export default function Page(): JSX.Element {
       />
 
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
-        <aside className="md:w-40 border-b-4 md:border-b-0 md:border-r-4" style={{ borderColor: 'var(--ink)' }}>
-          <EngineRail
-            engines={engineSummaries}
-            activeId={inst.engineId}
-            onSelect={inst.selectEngine}
-          />
-          <PresetPanel
-            presets={inst.presets}
-            userPresets={inst.userPresets}
-            activeId={inst.activePresetId}
-            colour={colour}
-            onLoad={inst.loadPreset}
-            onLoadUser={inst.loadUserPreset}
-            onSave={inst.savePreset}
-            suggestedName={inst.suggestedName}
-          />
+        <aside
+          className="md:w-40 shrink-0 border-b-4 md:border-b-0 md:border-r-4"
+          style={{ borderColor: 'var(--ink)' }}
+        >
+          {/* In SONG scope the rail stacks: tracks, then the selected track's
+              engine, then its presets. Neither component below changes — their
+              props were already selection-agnostic. */}
+          {songScope && (
+            <TrackRail
+              tracks={song.arr.trackViews}
+              selectedId={song.arr.selectedTrackId}
+              onSelect={song.arr.selectTrack}
+              onToggleMute={song.arr.toggleMute}
+              onRename={song.arr.renameTrack}
+              onAdd={(): void => { song.arr.addTrack(inst.engineId); }}
+              remainingSlots={song.arr.remainingSlots}
+              colour={colour}
+            />
+          )}
+          <button
+            type="button"
+            aria-expanded={railOpen}
+            aria-label={railOpen ? 'Hide engines and presets' : 'Show engines and presets'}
+            onClick={(): void => setRailOpen((o) => !o)}
+            className="w-full flex items-center justify-between px-3 border-b-[3px]
+                       text-[10px] font-bold uppercase tracking-[0.16em]"
+            style={{ minHeight: '44px', borderColor: 'var(--ink)', color: 'var(--ink)' }}
+          >
+            <span>{inst.descriptor?.name ?? 'Engine'}</span>
+            <span aria-hidden="true">{railOpen ? '▾' : '▸'}</span>
+          </button>
+          {railOpen && (
+            <EngineRail
+              engines={engineSummaries}
+              activeId={inst.engineId}
+              onSelect={songScope ? song.selectEngine : inst.selectEngine}
+            />
+          )}
+          {railOpen && (
+            <PresetPanel
+              presets={inst.presets}
+              userPresets={inst.userPresets}
+              activeId={inst.activePresetId}
+              colour={colour}
+              onLoad={inst.loadPreset}
+              onLoadUser={inst.loadUserPreset}
+              onSave={inst.savePreset}
+              suggestedName={inst.suggestedName}
+            />
+          )}
         </aside>
 
         <section className="flex-1 min-w-0 flex flex-col">
-          <div className="flex border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
+          <div className="flex overflow-x-auto border-b-[3px]" style={{ borderColor: 'var(--ink)' }}>
             {(['sculpt', 'deep', 'fx', 'hunt', 'export', 'setup'] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={view === v}
-                onClick={(): void => { setView(v); if (v === 'hunt' && inst.huntVariations.length === 0) inst.reroll(); }}
-                className="px-4 py-2 text-[10px] font-bold uppercase tracking-[0.18em] border-r-[3px]"
-                style={{
-                  borderColor: 'var(--ink)',
-                  background: view === v ? colour : 'transparent',
-                  color: view === v ? 'var(--bg)' : 'var(--muted)',
-                }}
-              >
-                {v}
-              </button>
+              <Fragment key={v}>
+                {v === 'hunt' && (
+                  <ScopeSwitch scope={song.arr.scope} onScope={song.arr.setScope} colour={colour} />
+                )}
+                <button
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={(): void => {
+                    setView(v);
+                    // In SONG scope the tabs live in the side panel, so tapping
+                    // one has to open it — otherwise the tab you asked for is
+                    // selected somewhere you cannot see.
+                    if (songScope) setSideOpen(true);
+                    if (v === 'hunt' && inst.huntVariations.length === 0) inst.reroll();
+                  }}
+                  className="shrink-0 px-4 text-[10px] font-bold uppercase tracking-[0.18em] border-r-[3px]"
+                  style={{
+                    minHeight: '44px',
+                    borderColor: 'var(--ink)',
+                    background: view === v ? colour : 'transparent',
+                    color: view === v ? 'var(--bg)' : 'var(--ink)',
+                    opacity: songScope && !sideOpen ? 0.6 : 1,
+                  }}
+                >
+                  {v}
+                </button>
+              </Fragment>
             ))}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto p-4">
-            {view === 'sculpt' && (
-              <div className="flex flex-col md:flex-row gap-5 items-start">
-                <div className="w-full max-w-[300px] shrink-0 flex flex-col gap-4">
-                  <XYPad
-                    xLabel={inst.macroNames[1]}
-                    yLabel={inst.macroNames[0]}
-                    x={inst.macros[1]}
-                    y={inst.macros[0]}
-                    colour={colour}
-                    onChange={onXY}
-                  />
-                  <SigilCard
-                    sigil={inst.sigil}
-                    trueName={inst.trueName}
-                    suggestedName={inst.suggestedName}
-                    trail={inst.trail}
-                    colour={colour}
-                    onSave={inst.savePreset}
-                  />
-                </div>
-                <div className="flex-1 min-w-0 flex flex-col gap-5">
-                  <MacroRow
-                    names={inst.macroNames}
-                    values={inst.macros}
-                    colour={colour}
-                    onChange={inst.setMacro}
-                  />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="h-32">
-                      <Scope analyser={inst.host?.analyser ?? null} colour={colour} />
-                    </div>
-                    <div className="h-32">
-                      <Spectrum analyser={inst.host?.analyser ?? null} colour={colour} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+          {songScope && (
+            <SongPane
+              deck={song}
+              height={gridHeight}
+              onHeight={setGridHeight}
+              onPickNote={setPickerCell}
+              colour={colour}
+            />
+          )}
 
-            {view === 'deep' && inst.descriptor && inst.values && (
-              <ParamGroups
-                descriptor={inst.descriptor}
-                values={inst.values}
-                colour={colour}
-                onChange={inst.setParam}
-              />
-            )}
+          {songScope && pickerCell !== null && (
+            <NotePicker
+              label={song.cellLabel}
+              root={scaleState.root}
+              scale={scaleState.scale}
+              octave={octave}
+              onOctave={setOctave}
+              onPick={(midi): void => {
+                song.arr.addNote(pickerCell.trackId, pickerCell.sectionId, midi);
+                setPickerCell(null);
+              }}
+              onClose={(): void => setPickerCell(null)}
+              colour={colour}
+            />
+          )}
 
-            {view === 'fx' && (
-              <div className="flex flex-col lg:flex-row gap-8">
-                <div className="flex-1 min-w-0">
-                  <div className="label mb-3" style={{ color: colour }}>Chain</div>
-                  <ParamGroups
-                    descriptor={inst.fxDescriptor}
-                    values={inst.fxValues}
-                    colour={colour}
-                    onChange={inst.setFxParam}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="label mb-3" style={{ color: 'var(--physical)' }}>Character</div>
-                  <ParamGroups
-                    descriptor={inst.magicDescriptor}
-                    values={inst.magicValues}
-                    colour="var(--physical)"
-                    onChange={inst.setMagicParam}
-                  />
-                </div>
-              </div>
-            )}
+          {songScope && (
+            <CellStrip
+              label={song.cellLabel}
+              hasClip={song.cellHasClip}
+              moveArmed={song.pendingClipId !== null}
+              onAddNote={(): void => setPickerCell(song.cell)}
+              onMove={song.armMove}
+              onClear={song.clearCell}
+              onTranspose={song.transposeCell}
+              colour={colour}
+            />
+          )}
 
-            {/* Mounted always, parked off-screen when elsewhere, so the camera
-                and its stream survive tab changes. */}
-            <div
-              aria-hidden={view !== 'setup'}
-              style={view === 'setup' ? undefined : {
-                position: 'fixed', left: -99999, top: 0,
-                width: 900, height: 700, overflow: 'hidden', pointerEvents: 'none',
+          {songScope && (
+            <LoopStrip
+              seq={{ ...song.seq, toggleRecord: song.toggleRecord }}
+              targetLabel={song.targetLabel}
+              colour={colour}
+            />
+          )}
+
+          {/* The play surface sits directly under the song in SONG scope, so
+              the hand that plays a part and the eye that watches it land are
+              never more than a row apart. In SOUND scope it stays in the
+              footer, exactly where it has always been. */}
+          {songScope && (
+            <div className="shrink-0 overflow-y-auto">
+              {playSurface}
+            </div>
+          )}
+
+          {!songScope && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+              {tabContent}
+            </div>
+          )}
+        </section>
+
+        {/* SOUND scope: the tabs are the centre. SONG scope: they fold to the
+            side — available, not occupying it. */}
+        {songScope && (
+          <aside
+            className="shrink-0 flex flex-col border-t-4 md:border-t-0 md:border-l-4"
+            style={{ borderColor: 'var(--ink)' }}
+          >
+            <button
+              type="button"
+              aria-expanded={sideOpen}
+              aria-label={sideOpen ? `Minimise ${view}` : `Open ${view}`}
+              onClick={(): void => setSideOpen((o) => !o)}
+              className="shrink-0 flex items-center justify-center gap-2 px-3 border-b-[3px]
+                         text-[10px] font-bold uppercase tracking-[0.16em]"
+              style={{
+                minHeight: '44px', minWidth: '44px',
+                borderColor: 'var(--ink)', color: 'var(--ink)',
               }}
             >
-              <SetupPanel
-                audioContext={inst.host?.context ?? null}
-                engineDescriptor={inst.descriptor}
-                fxDescriptor={inst.fxDescriptor}
-                magicDescriptor={inst.magicDescriptor}
-                padChords={chordConfig}
-                onPadChords={(next): void => {
-                  scaleState.setMode(next.mode === 'off' ? 'notes' : 'chords');
-                  scaleState.setRoot(((next.root % 12) + 12) % 12);
-                  scaleState.setScale(next.scale);
-                }}
-                onParam={(address, value): void => inst.setParamByAddress(address, value)}
-                onNoteOn={chordInput.noteOn}
-                onNoteOff={chordInput.noteOff}
-                enabled={inst.started}
-                section={setupSection}
-                onSection={setSetupSection}
-                macroNames={inst.macroNames}
-                kit={kit}
-                colour={colour}
-                bouncing={inst.bouncing}
-                onRenderForKit={inst.renderCurrent}
-                onHands={onHands}
-                bounceMs={inst.bounceMs}
-                onBounceMs={inst.setBounceMs}
-              />
-            </div>
-
-            {view === 'export' && (
-              <ExportTray
-                items={tray.items}
-                dragProps={tray.dragProps}
-                onDownload={tray.download}
-                onDownloadAll={tray.downloadAll}
-                onRemove={tray.remove}
-                accent={colour}
-              />
+              <span>{view}</span>
+              <span aria-hidden="true">{sideOpen ? '▸' : '◂'}</span>
+            </button>
+            {sideOpen && (
+              <div
+                className="min-h-0 flex-1 overflow-y-auto p-3"
+                style={{ width: 'min(420px, 100vw)' }}
+              >
+                {tabContent}
+              </div>
             )}
-
-            {view === 'hunt' && (
-              <HuntGrid
-                variations={inst.huntVariations.map((v) => ({
-                  id: v.id,
-                  title: v.title,
-                  sigil: v.sigil,
-                  changes: v.changes,
-                  kept: v.kept,
-                }))}
-                auditioningId={inst.auditioningId}
-                colour={colour}
-                trail={inst.trail}
-                tasteLabels={inst.tasteLabels}
-                onAudition={inst.auditionVariation}
-                onToggleKeep={inst.toggleKeep}
-                onBreed={inst.breedKept}
-                onReroll={inst.reroll}
-                onForget={inst.forgetTaste}
-                keptCount={inst.huntVariations.filter((v) => v.kept).length}
-              />
-            )}
-          </div>
-        </section>
+          </aside>
+        )}
       </div>
 
       <footer className="border-t-4" style={{ borderColor: 'var(--ink)' }}>
@@ -371,13 +588,23 @@ export default function Page(): JSX.Element {
                 onClick={(): void => inst.chooseLayout(l)}
                 className="border-[2px] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
                 style={{
-                  borderColor: inst.layout === l ? colour : 'var(--muted)',
-                  color: inst.layout === l ? colour : 'var(--muted)',
+                  borderColor: inst.layout === l ? colour : 'var(--ink)',
+                  color: inst.layout === l ? colour : 'var(--ink)',
                 }}
               >
                 {l}
               </button>
             ))}
+            <button
+              type="button"
+              aria-expanded={keysOpen}
+              aria-label={keysOpen ? 'Hide the keyboard' : 'Show the keyboard'}
+              onClick={(): void => setKeysOpen((o) => !o)}
+              className="border-[2px] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em]"
+              style={{ borderColor: 'var(--ink)', color: 'var(--ink)' }}
+            >
+              {keysOpen ? 'hide ▾' : 'show ▸'}
+            </button>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="label">Octave</span>
@@ -421,37 +648,20 @@ export default function Page(): JSX.Element {
               background: inst.held.size > 0 ? '#FF3B30' : 'transparent',
               color: inst.held.size > 0 ? 'var(--bg)' : 'var(--ink)',
             }}
-            onClick={secrets.panicPressed}
+            onClick={(): void => { song.panicAll(); secrets.panicPressed(); }}
           >
             Panic{inst.held.size > 0 ? ` ${inst.held.size}` : ''}
           </button>
         </div>
 
-        <ScalePicker state={scaleState} colour={colour} />
-        {inst.layout === 'keys' ? (
-          <Keys
-            octave={octave}
-            held={inst.held}
-            scaleRoot={scaleState.root}
-            scale={scaleState.scale}
-            chords={scaleState.mode === 'chords'}
-            onNoteOn={chordInput.noteOn}
-            onNoteOff={chordInput.noteOff}
-          />
-        ) : (
-          <PadGrid
-            rows={4}
-            cols={4}
-            root={12 * octave + scaleState.root}
-            scale={scaleState.scale}
-            mode={scaleState.mode}
+        {!songScope && (
+          <LoopStrip
+            seq={{ ...song.seq, toggleRecord: song.toggleRecord }}
+            targetLabel={song.targetLabel}
             colour={colour}
-            onNoteOn={inst.noteOn}
-            onNoteOff={inst.noteOff}
-            heldPads={heldPads}
           />
         )}
-
+        {!songScope && playSurface}
       </footer>
 
       <InstallPrompt colour={colour} />

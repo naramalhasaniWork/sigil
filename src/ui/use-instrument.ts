@@ -145,6 +145,10 @@ export function useInstrument() {
   const descriptor = engine?.descriptor;
   const current = values[engineId];
 
+  /** Read synchronously by applySound, which must not depend on `values`. */
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+
   /*
    * Where the current sound came from, and what the machine has worked out about
    * your ear. Declared here rather than beside Hunt because loading a preset is
@@ -185,6 +189,31 @@ export function useInstrument() {
     }
     setStarted(true);
   }, [engineId, values, fxValues, magicValues]);
+
+  /**
+   * Give the audio device back when this hook goes away.
+   *
+   * Without this, every remount built a SECOND AudioWorkletNode onto the same
+   * destination while the first kept running, and two engines summing into one
+   * output comb-filter each other. It does not sound like a crash — it sounds
+   * like the instrument lost its clarity — and Panic cannot clear it, because
+   * Panic only reaches the host the UI is currently holding. In development
+   * every hot reload stacked another one.
+   *
+   * No dependencies, so the cleanup runs exactly once, on genuine unmount. The
+   * host is built on the power gesture rather than at mount, so React's
+   * StrictMode mount/unmount/mount pass finds `hostRef.current` still null on
+   * its first cleanup and disposes nothing; the ref is cleared either way, so
+   * `start()` builds a fresh host rather than resuming a closed context.
+   *
+   * `started` needs no correction here: it is component state, and the only
+   * thing that disposes the host is that component going away with it.
+   */
+  useEffect(() => (): void => {
+    const host = hostRef.current;
+    hostRef.current = null;
+    void host?.dispose();
+  }, []);
 
   const selectEngine = useCallback((id: string): void => {
     setEngineId(id);
@@ -798,9 +827,54 @@ export function useInstrument() {
     return true;
   }, [descriptor, loadValues]);
 
+  /**
+   * Point the whole instrument at another sound: engine and patch together, in
+   * one gesture. Selecting a track in SONG scope is exactly this — sculpt,
+   * deep, fx and hunt keep their meaning and simply start editing the track you
+   * picked. This is the one seam section 2.7 of the arrangement IA asks for.
+   *
+   * It cannot be selectEngine() followed by importPatch(): importPatch resolves
+   * its descriptor from the CURRENT engine, and that state has not landed yet,
+   * so the patch would be read against the engine you were leaving.
+   *
+   * A track with no stored patch keeps whatever that engine already holds,
+   * which is what makes a one-track song byte-for-byte today's app.
+   */
+  const applySound = useCallback((nextEngineId: string, patch?: unknown): void => {
+    const target = ENGINES.find((e) => e.descriptor.id === nextEngineId);
+    if (!target) return;
+    const host = hostRef.current;
+    setEngineId(nextEngineId);
+    host?.setEngine(nextEngineId);
+
+    const loaded = patch === undefined || patch === null
+      ? null
+      : loadPatch(patch, target.descriptor, FX_DESCRIPTOR, FX_MAGIC_DESCRIPTOR);
+
+    if (loaded === null) {
+      const held = valuesRef.current[nextEngineId];
+      if (held) host?.setAllParams(held);
+      return;
+    }
+
+    setValues((prev) => ({ ...prev, [nextEngineId]: Float32Array.from(loaded.values) }));
+    host?.setAllParams(loaded.values);
+    if (loaded.fx) {
+      setFxValues(loaded.fx);
+      for (let i = 0; i < loaded.fx.length; i++) {
+        host?.setParam(addressOf('fx', i), loaded.fx[i] as number);
+      }
+    }
+    if (loaded.magic) {
+      setMagicValues(loaded.magic);
+      for (let i = 0; i < loaded.magic.length; i++) {
+        host?.setParam(addressOf('magic', i), loaded.magic[i] as number);
+      }
+    }
+  }, []);
 
   return {
-    exportPatch, importPatch,
+    exportPatch, importPatch, applySound,
     host: hostRef.current,
     started, start,
     engine, descriptor, engineId, selectEngine,

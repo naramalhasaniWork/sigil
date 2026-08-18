@@ -21,6 +21,12 @@ export interface TrackRowProps {
   /** Where a clip being dragged would land if the pointer lifted now. */
   dropSectionId: string | null;
   draggingClipId: string | null;
+  /**
+   * A clip is armed for tap-to-place, so every cell that is not its own home is
+   * a landing spot. Dragging a 44px block between 44px cells is the worst
+   * interaction in every mobile DAW; this is the two-tap path that replaces it.
+   */
+  pendingClipId: string | null;
   onSelectTrack: (id: string) => void;
   onSelectCell: (trackId: string, sectionId: string) => void;
   onClearCell: (trackId: string, sectionId: string) => void;
@@ -78,7 +84,7 @@ function Toggle({
  */
 export function TrackRow({
   track, cells, boxes, sectionNames, gutterWidth, height, selected, selectedSectionId,
-  dropSectionId, draggingClipId, onSelectTrack, onSelectCell, onClearCell,
+  dropSectionId, draggingClipId, pendingClipId, onSelectTrack, onSelectCell, onClearCell,
   onToggleMute, onToggleSolo, onSetGain, onClipDragStart,
 }: TrackRowProps): JSX.Element {
   const levelRef = useRef<HTMLDivElement | null>(null);
@@ -104,6 +110,7 @@ export function TrackRow({
           width: `${gutterWidth}px`,
           borderColor: 'var(--ink)',
           background: selected ? 'var(--panel)' : 'var(--bg)',
+          boxShadow: selected ? 'inset 0 0 0 3px var(--ink)' : 'none',
         }}
       >
         {selected && (
@@ -203,6 +210,8 @@ export function TrackRow({
         {boxes.map((box) => {
           const cell = cells[box.id] ?? EMPTY_CELL;
           const isDrop = dropSectionId === box.id;
+          const targeted = isDrop
+            || (pendingClipId !== null && cell.clipId !== pendingClipId);
           return (
             <div key={box.id} className="contents">
               <ClipBlock
@@ -213,6 +222,7 @@ export function TrackRow({
                 colour={face}
                 selected={selected && selectedSectionId === box.id}
                 dragging={cell.clipId !== null && cell.clipId === draggingClipId}
+                targeted={targeted}
                 label={`${track.name} · ${sectionNames[box.id] ?? box.id}`}
                 onSelect={(): void => onSelectCell(track.id, box.id)}
                 onClear={(): void => onClearCell(track.id, box.id)}
