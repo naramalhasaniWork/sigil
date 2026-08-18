@@ -17,6 +17,7 @@ import { ParamGroups } from '@/ui/components/param-groups';
 import { HuntGrid } from '@/ui/components/hunt-grid';
 import { PadGrid } from '@/ui/components/pad-grid';
 import { Keys } from '@/ui/components/keys';
+import { ScalePicker, useScaleState } from '@/ui/components/scale-picker';
 import { Scope } from '@/ui/components/scope';
 import { Spectrum } from '@/ui/components/spectrum';
 import { PresetPanel } from '@/ui/components/preset-panel';
@@ -27,6 +28,7 @@ export default function Page(): JSX.Element {
   const inst = useInstrument();
   const [view, setView] = useState<View>('sculpt');
   const [octave, setOctave] = useState(4);
+  const scaleState = useScaleState();
 
   const colour = inst.descriptor?.colour ?? '#FF6B6B';
   const tray = useDragExport();
@@ -284,10 +286,13 @@ export default function Page(): JSX.Element {
           <button type="button" className="label" onClick={inst.panic}>Panic</button>
         </div>
 
+        <ScalePicker state={scaleState} colour={colour} />
         {inst.layout === 'keys' ? (
           <Keys
             octave={octave}
             held={inst.held}
+            scaleRoot={scaleState.root}
+            scale={scaleState.scale}
             onNoteOn={inst.noteOn}
             onNoteOff={inst.noteOff}
           />
@@ -295,9 +300,9 @@ export default function Page(): JSX.Element {
           <PadGrid
             rows={4}
             cols={4}
-            root={12 * (octave - 1)}
-            scale="minor"
-            mode="chords"
+            root={12 * octave + scaleState.root}
+            scale={scaleState.scale}
+            mode={scaleState.mode}
             colour={colour}
             onNoteOn={inst.noteOn}
             onNoteOff={inst.noteOff}

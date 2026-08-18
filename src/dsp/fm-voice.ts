@@ -50,6 +50,8 @@ class FmVoice implements EngineVoice {
   private readonly envD: Envelope;
   private readonly indexSmooth: Smoother;
   private readonly fbSmooth: Smoother;
+  private readonly levelSmooth: readonly [Smoother, Smoother, Smoother, Smoother];
+  private readonly gainSmooth: readonly [Smoother, Smoother, Smoother, Smoother];
 
   private readonly sr: number;
   private baseFreq = 220;
@@ -74,12 +76,16 @@ class FmVoice implements EngineVoice {
     this.envD = new Envelope(sampleRate);
     this.indexSmooth = new Smoother(sampleRate, 12);
     this.fbSmooth = new Smoother(sampleRate, 12);
+    const mk = (): Smoother => new Smoother(sampleRate, 8);
+    this.levelSmooth = [mk(), mk(), mk(), mk()];
+    this.gainSmooth = [mk(), mk(), mk(), mk()];
     for (let i = 0; i < FM_DESCRIPTOR.params.length; i++) {
       this.params[i] = FM_DESCRIPTOR.params[i]?.default ?? 0;
     }
     this.applyRouting();
     this.indexSmooth.snap(this.params[P_INDEX] as number);
     this.fbSmooth.snap(this.params[P_FEEDBACK] as number);
+    this.snapGains();
   }
 
   setParam(index: number, value: number): void {
@@ -146,6 +152,19 @@ class FmVoice implements EngineVoice {
     }
   }
 
+  /** Levels and carrier balance run through smoothers so drags cannot step the
+   *  gain at block edges; a fresh note snaps them so it starts at its target
+   *  instead of gliding in from a stolen voice's stale state. */
+  private snapGains(): void {
+    this.updateBlock();
+    const ls = this.levelSmooth;
+    const gs = this.gainSmooth;
+    ls[0].snap(this.level[0] as number); gs[0].snap(this.carrierGain[0] as number);
+    ls[1].snap(this.level[1] as number); gs[1].snap(this.carrierGain[1] as number);
+    ls[2].snap(this.level[2] as number); gs[2].snap(this.carrierGain[2] as number);
+    ls[3].snap(this.level[3] as number); gs[3].snap(this.carrierGain[3] as number);
+  }
+
   noteOn(freq: number, velocity: number, voiceIndex: number): void {
     this.baseFreq = freq > 1 ? freq : 1;
     this.velocity = velocity;
@@ -164,6 +183,7 @@ class FmVoice implements EngineVoice {
     this.envD.trigger();
     this.indexSmooth.snap(this.params[P_INDEX] as number);
     this.fbSmooth.snap(this.params[P_FEEDBACK] as number);
+    this.snapGains();
   }
 
   noteOff(): void {
@@ -193,20 +213,18 @@ class FmVoice implements EngineVoice {
     const i1 = this.inc[1] as number;
     const i2 = this.inc[2] as number;
     const i3 = this.inc[3] as number;
-    const l0 = this.level[0] as number;
-    const l1 = this.level[1] as number;
-    const l2 = this.level[2] as number;
-    const l3 = this.level[3] as number;
-    const g0 = this.carrierGain[0] as number;
-    const g1 = this.carrierGain[1] as number;
-    const g2 = this.carrierGain[2] as number;
-    const g3 = this.carrierGain[3] as number;
+    const ls = this.levelSmooth;
+    const gs = this.gainSmooth;
     const algo = this.algo;
     const ks = this.keyScale;
     const amp = this.velocity * 0.32;
 
     this.indexSmooth.setTarget(this.params[P_INDEX] as number);
     this.fbSmooth.setTarget(this.params[P_FEEDBACK] as number);
+    ls[0].setTarget(this.level[0] as number); gs[0].setTarget(this.carrierGain[0] as number);
+    ls[1].setTarget(this.level[1] as number); gs[1].setTarget(this.carrierGain[1] as number);
+    ls[2].setTarget(this.level[2] as number); gs[2].setTarget(this.carrierGain[2] as number);
+    ls[3].setTarget(this.level[3] as number); gs[3].setTarget(this.carrierGain[3] as number);
 
     for (let n = 0; n < count; n++) {
       const e0 = this.envA.next();
@@ -214,6 +232,10 @@ class FmVoice implements EngineVoice {
       const e2 = this.envC.next();
       const e3 = this.envD.next();
       const index = this.indexSmooth.next() * ks;
+      const l0 = ls[0].next(); const l1 = ls[1].next();
+      const l2 = ls[2].next(); const l3 = ls[3].next();
+      const g0 = gs[0].next(); const g1 = gs[1].next();
+      const g2 = gs[2].next(); const g3 = gs[3].next();
 
       this.ph0 += i0; if (this.ph0 >= 1) this.ph0 -= 1;
       this.ph1 += i1; if (this.ph1 >= 1) this.ph1 -= 1;

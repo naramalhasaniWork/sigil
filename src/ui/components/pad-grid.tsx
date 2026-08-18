@@ -27,6 +27,59 @@ interface Pad {
 /** Keyboard presses borrow pointer ids no real pointer can have. */
 const KEY_POINTER_BASE = -1000;
 
+/** Roots the scale picker spells flat; their pads should read Bbm7, not A#m7. */
+const FLAT_ROOTS: ReadonlySet<number> = new Set([1, 3, 6, 8, 10]);
+const FLAT_NAMES: Readonly<Record<string, string>> = {
+  'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab', 'A#': 'Bb',
+};
+
+function respell(label: string, flat: boolean): string {
+  if (!flat) return label;
+  const flatName = FLAT_NAMES[label.slice(0, 2)];
+  return flatName === undefined ? label : flatName + label.slice(2);
+}
+
+/**
+ * Row voicings. Octave-stacking (voiceChord's spread) is too coarse here: at
+ * four rows it throws the top voice three octaves up and the chord goes thin.
+ * Inversions move one note at a time, so every row stays inside about an
+ * octave and a half and all sixteen pads sound like the same instrument.
+ */
+function voiceForRow(notes: readonly number[], row: number, rowCount: number): number[] {
+  const out = [...notes];
+  if (row <= 0 || out.length === 0) return out;
+  if (row < out.length) {
+    // Nth inversion: lift the lowest `row` notes an octave.
+    for (let i = 0; i < row; i++) {
+      const low = out.shift();
+      if (low === undefined) break;
+      out.push(low + 12);
+    }
+    return out;
+  }
+  // Past the available inversions, open the chord: keep the bass, lift the rest.
+  const [bass, ...rest] = out;
+  if (bass === undefined) return out;
+  const extra = row - out.length + 1;
+  return [bass, ...rest.map((n) => n + 12 * Math.min(extra, 1))];
+}
+
+/**
+ * Which scale degrees get columns. The first four are the four chords most
+ * popular music is actually built from — I, IV, V, vi in major; i, iv, v, VI in
+ * minor — so the grid is useful before you understand it. Remaining degrees
+ * fill in only on wider grids.
+ */
+function degreeColumns(cols: number, degrees: number): number[] {
+  const out: number[] = [];
+  for (const d of [0, 3, 4, 5, 1, 2, 6]) {
+    if (out.length >= cols) break;
+    if (d < degrees) out.push(d);
+  }
+  for (let d = 0; out.length < cols; d++) out.push(d % Math.max(1, degrees));
+  return out;
+}
+
 function buildPads(
   rows: number,
   cols: number,
@@ -34,27 +87,56 @@ function buildPads(
   scale: ScaleName,
   mode: 'notes' | 'chords',
 ): Pad[] {
-  const count = Math.max(0, Math.floor(rows) * Math.floor(cols));
+  const rowCount = Math.max(0, Math.floor(rows));
+  const colCount = Math.max(0, Math.floor(cols));
+  const count = rowCount * colCount;
   const degrees = SCALES[scale].length;
+  const flat = FLAT_ROOTS.has(((root % 12) + 12) % 12);
+
   if (mode === 'notes') {
-    return scaleNotes(root, scale, count).map((midi, index) => ({
-      index,
-      notes: [midi],
-      label: noteName(midi),
-      aria: `Pad ${index + 1}, note ${noteName(midi)}`,
-      isRoot: index % degrees === 0,
-    }));
-  }
-  const pads: Pad[] = [];
-  for (let index = 0; index < count; index++) {
-    const chord = diatonicChord(root, scale, index);
-    pads.push({
-      index,
-      notes: chord.notes,
-      label: chord.label,
-      aria: `Pad ${index + 1}, chord ${chord.label}`,
-      isRoot: index % degrees === 0,
+    return scaleNotes(root, scale, count).map((midi, index) => {
+      const label = respell(noteName(midi), flat);
+      return {
+        index,
+        notes: [midi],
+        label,
+        aria: `Pad ${index + 1}, note ${label}`,
+        isRoot: index % degrees === 0,
+      };
     });
+  }
+
+  /*
+   * Chords used to climb one scale degree per pad, so a 4x4 grid spanned over
+   * two octaves and the top row was thin, stacked chords nobody would play.
+   * Instead: columns are scale degrees, rows are voicing width. Every pad
+   * sounds in the same register, and moving down a column opens the same chord
+   * up rather than transposing it into the ceiling.
+   */
+  const cols_ = degreeColumns(colCount, degrees);
+  const pads: Pad[] = [];
+  for (let row = 0; row < rowCount; row++) {
+    for (let col = 0; col < colCount; col++) {
+      const degree = cols_[col] ?? 0;
+      const chord = diatonicChord(root, scale, degree);
+      const notes = voiceForRow(chord.notes, row, rowCount);
+      const base = respell(chord.label, flat);
+      // Slash notation when the bass is no longer the root — Cm/Eb, not "Cm
+      // that mysteriously sounds different".
+      const bass = notes[0];
+      const rootPitch = chord.notes[0];
+      const label = bass !== undefined && rootPitch !== undefined && bass % 12 !== rootPitch % 12
+        ? `${base}/${respell(noteName(bass).replace(/-?\d+$/, ''), flat)}`
+        : base;
+      const index = row * colCount + col;
+      pads.push({
+        index,
+        notes,
+        label,
+        aria: `Pad ${index + 1}, chord ${label}, voicing ${row + 1} of ${rowCount}`,
+        isRoot: degree === 0,
+      });
+    }
   }
   return pads;
 }

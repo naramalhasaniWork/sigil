@@ -1552,6 +1552,8 @@ var FmVoice = class {
   envD;
   indexSmooth;
   fbSmooth;
+  levelSmooth;
+  gainSmooth;
   sr;
   baseFreq = 220;
   velocity = 1;
@@ -1573,12 +1575,16 @@ var FmVoice = class {
     this.envD = new Envelope(sampleRate2);
     this.indexSmooth = new Smoother(sampleRate2, 12);
     this.fbSmooth = new Smoother(sampleRate2, 12);
+    const mk = () => new Smoother(sampleRate2, 8);
+    this.levelSmooth = [mk(), mk(), mk(), mk()];
+    this.gainSmooth = [mk(), mk(), mk(), mk()];
     for (let i = 0; i < FM_DESCRIPTOR.params.length; i++) {
       this.params[i] = FM_DESCRIPTOR.params[i]?.default ?? 0;
     }
     this.applyRouting();
     this.indexSmooth.snap(this.params[P_INDEX]);
     this.fbSmooth.snap(this.params[P_FEEDBACK]);
+    this.snapGains();
   }
   setParam(index, value) {
     if (index < 0 || index >= this.params.length) return;
@@ -1637,6 +1643,22 @@ var FmVoice = class {
       rank++;
     }
   }
+  /** Levels and carrier balance run through smoothers so drags cannot step the
+   *  gain at block edges; a fresh note snaps them so it starts at its target
+   *  instead of gliding in from a stolen voice's stale state. */
+  snapGains() {
+    this.updateBlock();
+    const ls = this.levelSmooth;
+    const gs = this.gainSmooth;
+    ls[0].snap(this.level[0]);
+    gs[0].snap(this.carrierGain[0]);
+    ls[1].snap(this.level[1]);
+    gs[1].snap(this.carrierGain[1]);
+    ls[2].snap(this.level[2]);
+    gs[2].snap(this.carrierGain[2]);
+    ls[3].snap(this.level[3]);
+    gs[3].snap(this.carrierGain[3]);
+  }
   noteOn(freq, velocity, voiceIndex) {
     this.baseFreq = freq > 1 ? freq : 1;
     this.velocity = velocity;
@@ -1655,6 +1677,7 @@ var FmVoice = class {
     this.envD.trigger();
     this.indexSmooth.snap(this.params[P_INDEX]);
     this.fbSmooth.snap(this.params[P_FEEDBACK]);
+    this.snapGains();
   }
   noteOff() {
     this.envA.release();
@@ -1680,25 +1703,35 @@ var FmVoice = class {
     const i1 = this.inc[1];
     const i2 = this.inc[2];
     const i3 = this.inc[3];
-    const l0 = this.level[0];
-    const l1 = this.level[1];
-    const l2 = this.level[2];
-    const l3 = this.level[3];
-    const g0 = this.carrierGain[0];
-    const g1 = this.carrierGain[1];
-    const g2 = this.carrierGain[2];
-    const g3 = this.carrierGain[3];
+    const ls = this.levelSmooth;
+    const gs = this.gainSmooth;
     const algo = this.algo;
     const ks = this.keyScale;
     const amp = this.velocity * 0.32;
     this.indexSmooth.setTarget(this.params[P_INDEX]);
     this.fbSmooth.setTarget(this.params[P_FEEDBACK]);
+    ls[0].setTarget(this.level[0]);
+    gs[0].setTarget(this.carrierGain[0]);
+    ls[1].setTarget(this.level[1]);
+    gs[1].setTarget(this.carrierGain[1]);
+    ls[2].setTarget(this.level[2]);
+    gs[2].setTarget(this.carrierGain[2]);
+    ls[3].setTarget(this.level[3]);
+    gs[3].setTarget(this.carrierGain[3]);
     for (let n = 0; n < count; n++) {
       const e0 = this.envA.next();
       const e1 = this.envB.next();
       const e2 = this.envC.next();
       const e3 = this.envD.next();
       const index = this.indexSmooth.next() * ks;
+      const l0 = ls[0].next();
+      const l1 = ls[1].next();
+      const l2 = ls[2].next();
+      const l3 = ls[3].next();
+      const g0 = gs[0].next();
+      const g1 = gs[1].next();
+      const g2 = gs[2].next();
+      const g3 = gs[3].next();
       this.ph0 += i0;
       if (this.ph0 >= 1) this.ph0 -= 1;
       this.ph1 += i1;
@@ -1713,17 +1746,18 @@ var FmVoice = class {
       this.fbZ1 = m3 < DENORM && m3 > -DENORM ? 0 : m3;
       let y = 0;
       if (algo === 0) {
-        const m1 = Math.sin(this.ph1 * TAU) * l1 * e1 * index;
+        const m1 = Math.sin(this.ph1 * TAU + m3 * index) * l1 * e1 * index;
         y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0;
       } else if (algo === 1) {
-        const m2 = Math.sin(this.ph2 * TAU) * l2 * e2 * index;
+        const m2 = Math.sin(this.ph2 * TAU + m3 * index) * l2 * e2 * index;
         const m1 = Math.sin(this.ph1 * TAU + m2) * l1 * e1 * index;
         y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0;
       } else if (algo === 2) {
         const m1 = Math.sin(this.ph1 * TAU) * l1 * e1 * index;
         y = Math.sin(this.ph0 * TAU + m1) * l0 * e0 * g0 + Math.sin(this.ph2 * TAU + m3 * index) * l2 * e2 * g2;
       } else if (algo === 3) {
-        y = Math.sin(this.ph0 * TAU) * l0 * e0 * g0 + Math.sin(this.ph1 * TAU) * l1 * e1 * g1 + Math.sin(this.ph2 * TAU) * l2 * e2 * g2 + m3 * g3;
+        const shade = m3 * index * 0.5;
+        y = Math.sin(this.ph0 * TAU + shade) * l0 * e0 * g0 + Math.sin(this.ph1 * TAU + shade * 1.4) * l1 * e1 * g1 + Math.sin(this.ph2 * TAU + shade * 0.7) * l2 * e2 * g2 + m3 * g3;
       } else {
         const m2 = Math.sin(this.ph2 * TAU) * l2 * e2 * index;
         y = Math.sin(this.ph0 * TAU + m2) * l0 * e0 * g0 + Math.sin(this.ph1 * TAU + m3 * index) * l1 * e1 * g1;
@@ -3162,13 +3196,477 @@ var SamplerEngine = {
   allocVoice: (sampleRate2) => new SamplerVoice(sampleRate2)
 };
 
+// src/dsp/wavetable-descriptor.ts
+var WAVETABLE_DESCRIPTOR = {
+  id: "wavetable",
+  name: "Wavetable",
+  colour: "#FF9F45",
+  macroNames: ["Body", "Air", "Grit", "Motion"],
+  params: [
+    {
+      id: "table-position",
+      name: "Position",
+      group: "Wavetable",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.35,
+      curve: "linear",
+      macro: 1,
+      macroDepth: 0.8,
+      mutability: 0.95,
+      explain: "Where you are in the row of eight waveforms, morphing smoothly from a pure sine through soft, hollow and buzzy shapes to vowels and finally a metallic clang. This one knob is most of the engine \u2014 sweep it and the whole character of the sound travels with it."
+    },
+    {
+      id: "position-env",
+      name: "Position Env",
+      group: "Wavetable",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.2,
+      curve: "linear",
+      macro: 3,
+      macroDepth: 0.75,
+      mutability: 0.9,
+      explain: "How far the envelope pushes the wavetable position while a note plays, so the timbre itself moves \u2014 bright and complex at the start, settling as it decays. This is what separates a living wavetable patch from a frozen snapshot of one."
+    },
+    {
+      id: "osc-detune",
+      name: "Detune",
+      group: "Oscillators",
+      unit: "semitones",
+      min: 0,
+      max: 1,
+      default: 0.07,
+      curve: "linear",
+      macro: 0,
+      macroDepth: 0.8,
+      mutability: 0.85,
+      explain: "Pushes the second oscillator slightly sharp of the first. Small amounts make the two copies beat against each other and the sound turns thick and wide; large amounts drift audibly out of tune."
+    },
+    {
+      id: "osc-mix",
+      name: "Osc Mix",
+      group: "Oscillators",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.5,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Balance between the two table oscillators: fully left is only the first, fully right only the detuned second. In the middle both play and the detune between them does its thickening work."
+    },
+    {
+      id: "filter-cutoff",
+      name: "Cutoff",
+      group: "Filter",
+      unit: "hz",
+      min: 20,
+      max: 18e3,
+      default: 4500,
+      curve: "exp",
+      mutability: 0.9,
+      explain: "The brightness control. Everything above this frequency is progressively removed, so lowering it makes the sound darker and more distant \u2014 useful for taming the harsher end of the wavetable row."
+    },
+    {
+      id: "filter-resonance",
+      name: "Resonance",
+      group: "Filter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.12,
+      curve: "linear",
+      mutability: 0.7,
+      explain: "Emphasises frequencies right at the cutoff point. Raise it for a vocal, squelchy character; near maximum the filter starts to whistle on its own."
+    },
+    {
+      id: "filter-env",
+      name: "Env Amount",
+      group: "Filter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.3,
+      curve: "linear",
+      mutability: 0.8,
+      explain: 'How far the envelope sweeps the cutoff when a note starts. This is what makes a note go "wow" or "pluck" rather than simply appearing.'
+    },
+    {
+      id: "drive",
+      name: "Drive",
+      group: "Character",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.15,
+      curve: "linear",
+      macro: 2,
+      macroDepth: 0.85,
+      mutability: 0.9,
+      explain: "Overdrives the signal going into the filter, adding harmonics and grit. A little adds weight and glue; a lot turns the clean digital tables aggressive and compressed."
+    },
+    {
+      id: "amp-attack",
+      name: "Attack",
+      group: "Envelope",
+      unit: "ms",
+      min: 0.5,
+      max: 4e3,
+      default: 3,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the note takes to reach full volume. Short is percussive, long turns any sound into a pad that swells in."
+    },
+    {
+      id: "amp-decay",
+      name: "Decay",
+      group: "Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 500,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How quickly the note falls from its peak to the sustain level after the attack finishes."
+    },
+    {
+      id: "amp-sustain",
+      name: "Sustain",
+      group: "Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.7,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "The level the note holds at while you keep the key down. Set it to zero and every note becomes a pluck regardless of how long you hold it."
+    },
+    {
+      id: "amp-release",
+      name: "Release",
+      group: "Envelope",
+      unit: "ms",
+      min: 1,
+      max: 8e3,
+      default: 350,
+      curve: "exp",
+      mutability: 0.6,
+      explain: "How long the sound takes to fade once you let go. Long releases let chords overlap and blur into each other."
+    },
+    {
+      id: "filter-keytrack",
+      name: "Key Track",
+      group: "Filter",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.35,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "Makes the cutoff follow the note you play, so high notes stay as bright as low ones. Without this, a patch that sings in the bass sounds muffled and dead two octaves up."
+    },
+    {
+      id: "amp-velocity",
+      name: "Vel > Level",
+      group: "Envelope",
+      unit: "pct",
+      min: 0,
+      max: 1,
+      default: 0.6,
+      curve: "linear",
+      mutability: 0.5,
+      explain: "How much playing harder increases volume. At zero every note lands at exactly the same level, which is fine for organs and wrong for everything else."
+    }
+  ]
+};
+
+// src/dsp/wavetable-voice.ts
+var P_POS = 0;
+var P_POS_ENV = 1;
+var P_DETUNE2 = 2;
+var P_MIX2 = 3;
+var P_CUTOFF3 = 4;
+var P_RES3 = 5;
+var P_FILTER_ENV2 = 6;
+var P_DRIVE3 = 7;
+var P_ATTACK4 = 8;
+var P_DECAY5 = 9;
+var P_SUSTAIN4 = 10;
+var P_RELEASE5 = 11;
+var P_KEYTRACK2 = 12;
+var P_VEL_AMP3 = 13;
+var LN22 = 0.6931471805599453;
+var TWO_PI6 = 6.283185307179586;
+var LOG2_REF2 = 8.03125;
+var CONTROL_STEP3 = 8;
+var OSC_GAIN2 = 0.9;
+var VOICE_GAIN3 = 0.35;
+var TABLE_COUNT = 8;
+var TABLE_SIZE = 2048;
+var STRIDE = TABLE_SIZE + 1;
+var LEVELS = 10;
+var MAX_HARM = 1 << LEVELS - 1;
+function hash01(n) {
+  let x = Math.imul(n, 2654435769);
+  x ^= x >>> 16;
+  x = Math.imul(x, 73244475);
+  x ^= x >>> 13;
+  return (x >>> 0) / 4294967296;
+}
+function bump(n, centre, width) {
+  const d = (n - centre) / width;
+  return Math.exp(-d * d);
+}
+function harmonicAmp(t, n) {
+  switch (t) {
+    case 0:
+      return n === 1 ? 1 : 0;
+    case 1:
+      return (n & 1) === 1 ? 1 / (n * n) : 0;
+    // Organic: a fast harmonic rolloff with a touch of octave, like a plucked gut string.
+    case 2:
+      return Math.exp(-0.75 * (n - 1)) + (n === 2 ? 0.22 : 0);
+    case 3:
+      return (n & 1) === 1 ? 1 / n : 0;
+    case 4:
+      return 1 / n;
+    // Vocal shapes: a thin sawtooth bed with formant bumps where vowels put them.
+    case 5:
+      return 0.1 / n + bump(n, 3, 1.6) + 0.65 * bump(n, 10, 3.5);
+    case 6:
+      return 0.1 / n + bump(n, 2, 1.2) + 0.55 * bump(n, 16, 5);
+    // Metallic: sparse pseudo-random partials, the recipe for a bell-like clang.
+    default:
+      return n === 1 ? 0.5 : hash01(n) < 0.2 ? 1 / Math.sqrt(n) : 0;
+  }
+}
+function harmonicPhase(t, n) {
+  if (t === 1) return (n & 3) === 3 ? Math.PI : 0;
+  if (t >= 5) return hash01(n * 17 + t) * TWO_PI6;
+  return 0;
+}
+function buildBank() {
+  const bank = new Float32Array(LEVELS * TABLE_COUNT * STRIDE);
+  const acc = new Float64Array(TABLE_SIZE);
+  for (let t = 0; t < TABLE_COUNT; t++) {
+    acc.fill(0);
+    let level = 0;
+    for (let n = 1; n <= MAX_HARM; n++) {
+      const a = harmonicAmp(t, n);
+      if (a !== 0) {
+        const step = TWO_PI6 * n / TABLE_SIZE;
+        const cosD = Math.cos(step), sinD = Math.sin(step);
+        const ph = harmonicPhase(t, n);
+        let s = Math.sin(ph), c = Math.cos(ph);
+        for (let i = 0; i < TABLE_SIZE; i++) {
+          acc[i] = acc[i] + a * s;
+          const ns = s * cosD + c * sinD;
+          c = c * cosD - s * sinD;
+          s = ns;
+        }
+      }
+      if (level < LEVELS && n === 1 << level) {
+        let peak = 1e-9;
+        for (let i = 0; i < TABLE_SIZE; i++) {
+          const v = acc[i];
+          if (v > peak) peak = v;
+          else if (-v > peak) peak = -v;
+        }
+        const g = 0.95 / peak;
+        const off = (level * TABLE_COUNT + t) * STRIDE;
+        for (let i = 0; i < TABLE_SIZE; i++) bank[off + i] = acc[i] * g;
+        bank[off + TABLE_SIZE] = bank[off];
+        level++;
+      }
+    }
+  }
+  return bank;
+}
+var BANK = buildBank();
+function saturate5(x) {
+  const x2 = x * x;
+  return x * (27 + x2) / (27 + 9 * x2);
+}
+var WavetableVoice = class {
+  filter;
+  ampEnv;
+  filterEnv;
+  posEnv;
+  cutoffSmooth;
+  posSmooth;
+  params = new Float32Array(WAVETABLE_DESCRIPTOR.params.length);
+  invSr;
+  ctrlRate;
+  maxFreq;
+  ph1 = 0;
+  ph2 = 0;
+  inc1 = 0;
+  inc2 = 0;
+  offA1 = 0;
+  offB1 = 0;
+  offA2 = 0;
+  offB2 = 0;
+  xfade = 0;
+  detuneMul = 1;
+  posAmt = 0;
+  ctrl = 0;
+  logFreq = LOG2_REF2;
+  velocity = 1;
+  active = false;
+  constructor(sampleRate2) {
+    this.invSr = 1 / sampleRate2;
+    this.ctrlRate = sampleRate2 / CONTROL_STEP3;
+    this.maxFreq = sampleRate2 * 0.45;
+    this.filter = createFilter("ladder", sampleRate2);
+    this.ampEnv = new Envelope(sampleRate2);
+    this.filterEnv = new Envelope(this.ctrlRate);
+    this.posEnv = new Envelope(this.ctrlRate);
+    this.cutoffSmooth = new Smoother(this.ctrlRate, 8);
+    this.posSmooth = new Smoother(this.ctrlRate, 15);
+    for (let i = 0; i < this.params.length; i++) {
+      this.params[i] = WAVETABLE_DESCRIPTOR.params[i]?.default ?? 0;
+    }
+    this.applyEnvelopes();
+    this.cutoffSmooth.snap(this.params[P_CUTOFF3]);
+    this.posSmooth.snap(this.params[P_POS]);
+  }
+  setParam(index, value) {
+    if (index < 0 || index >= this.params.length) return;
+    this.params[index] = value;
+    if (index >= P_ATTACK4 && index <= P_RELEASE5) this.applyEnvelopes();
+  }
+  applyEnvelopes() {
+    const p = this.params;
+    const a = p[P_ATTACK4], d = p[P_DECAY5];
+    const s = p[P_SUSTAIN4], r = p[P_RELEASE5];
+    this.ampEnv.set(a, d, s, r);
+    this.filterEnv.set(a, d * 0.8, s * 0.5, r);
+    this.posEnv.set(a, d * 1.2, s * 0.3, r);
+  }
+  noteOn(freq, velocity, voiceIndex) {
+    const f = freq > 8 ? freq < 12e3 ? freq : 12e3 : 8;
+    this.logFreq = Math.log2(f);
+    this.velocity = velocity > 0 ? velocity < 1 ? velocity : 1 : 0;
+    this.ph1 = (voiceIndex * 0.137 % 1 + 1) % 1;
+    this.ph2 = (voiceIndex * 0.311 % 1 + 1) % 1;
+    this.filter.reset();
+    this.applyEnvelopes();
+    this.ampEnv.trigger();
+    this.filterEnv.trigger();
+    this.posEnv.trigger();
+    this.cutoffSmooth.snap(this.params[P_CUTOFF3]);
+    this.posSmooth.snap(this.params[P_POS]);
+    this.ctrl = 0;
+    this.active = true;
+  }
+  noteOff() {
+    this.ampEnv.release();
+    this.filterEnv.release();
+    this.posEnv.release();
+  }
+  /** True once a note has been triggered and its amp envelope has run out. */
+  isFinished() {
+    return this.active && this.ampEnv.isFinished();
+  }
+  /** Bank offset of table `t` at the band-limit level right for `freq`. */
+  levelBase(freq) {
+    const harm = this.maxFreq / (freq > 1 ? freq : 1);
+    let level = Math.floor(Math.log2(harm > 1 ? harm : 1));
+    if (level >= LEVELS) level = LEVELS - 1;
+    return level * TABLE_COUNT * STRIDE;
+  }
+  /** Everything that moves slower than audio, recomputed once per control step. */
+  updateControl() {
+    const p = this.params;
+    const base = Math.exp(LN22 * this.logFreq);
+    const max = this.maxFreq;
+    const f1 = base > max ? max : base;
+    const f2raw = base * this.detuneMul;
+    const f2 = f2raw > max ? max : f2raw;
+    this.inc1 = f1 * this.invSr;
+    this.inc2 = f2 * this.invSr;
+    let pos = this.posSmooth.next() + this.posAmt * this.posEnv.next();
+    if (pos < 0) pos = 0;
+    else if (pos > 1) pos = 1;
+    const scaled = pos * (TABLE_COUNT - 1);
+    let tA = scaled | 0;
+    if (tA > TABLE_COUNT - 2) tA = TABLE_COUNT - 2;
+    this.xfade = scaled - tA;
+    const base1 = this.levelBase(f1);
+    const base2 = this.levelBase(f2);
+    this.offA1 = base1 + tA * STRIDE;
+    this.offB1 = this.offA1 + STRIDE;
+    this.offA2 = base2 + tA * STRIDE;
+    this.offB2 = this.offA2 + STRIDE;
+    const fenv = this.filterEnv.next();
+    const oct = p[P_KEYTRACK2] * (this.logFreq - LOG2_REF2);
+    let cut = this.cutoffSmooth.next() * Math.exp(LN22 * oct) * (1 + p[P_FILTER_ENV2] * fenv * 6);
+    if (!(cut > 10)) cut = 10;
+    else if (cut > max) cut = max;
+    this.filter.setCutoff(cut);
+  }
+  /** Linear-interpolated read of one oscillator: two tables, one crossfade. */
+  read(offA, offB, phase) {
+    const idx = phase * TABLE_SIZE;
+    const i0 = idx | 0;
+    const fr = idx - i0;
+    const a = BANK[offA + i0] + (BANK[offA + i0 + 1] - BANK[offA + i0]) * fr;
+    const b = BANK[offB + i0] + (BANK[offB + i0 + 1] - BANK[offB + i0]) * fr;
+    return a + (b - a) * this.xfade;
+  }
+  render(out, offset, count) {
+    if (!this.active) return;
+    const p = this.params;
+    this.detuneMul = Math.exp(LN22 * p[P_DETUNE2] / 12);
+    this.posAmt = p[P_POS_ENV];
+    this.cutoffSmooth.setTarget(p[P_CUTOFF3]);
+    this.posSmooth.setTarget(p[P_POS]);
+    this.filter.setResonance(p[P_RES3]);
+    const drive = 1 + p[P_DRIVE3] * 6, driveComp = 1 / Math.sqrt(drive);
+    const raw = p[P_MIX2];
+    const bal = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+    const g1 = (1 - bal) * OSC_GAIN2, g2 = bal * OSC_GAIN2;
+    const velAmp = p[P_VEL_AMP3];
+    const gain = (1 - velAmp + velAmp * this.velocity * this.velocity) * VOICE_GAIN3;
+    let i = 0;
+    while (i < count) {
+      if (this.ctrl === 0) {
+        this.updateControl();
+        this.ctrl = CONTROL_STEP3;
+      }
+      const m = this.ctrl < count - i ? this.ctrl : count - i;
+      for (let j = 0; j < m; j++) {
+        const s1 = this.read(this.offA1, this.offB1, this.ph1);
+        const s2 = this.read(this.offA2, this.offB2, this.ph2);
+        this.ph1 += this.inc1;
+        if (this.ph1 >= 1) this.ph1 -= 1;
+        this.ph2 += this.inc2;
+        if (this.ph2 >= 1) this.ph2 -= 1;
+        const sig = saturate5((s1 * g1 + s2 * g2) * drive) * driveComp;
+        let y = this.filter.process(sig) * this.ampEnv.next() * gain;
+        if (!(y > -4 && y < 4)) y = y > 0 ? 4 : y < 0 ? -4 : 0;
+        out[offset + i + j] = out[offset + i + j] + y;
+      }
+      i += m;
+      this.ctrl -= m;
+    }
+  }
+};
+var WavetableEngine = {
+  descriptor: WAVETABLE_DESCRIPTOR,
+  allocVoice: (sampleRate2) => new WavetableVoice(sampleRate2)
+};
+
 // src/dsp/registry.ts
 var ENGINES = [
   AnalogEngine,
   FmEngine,
   PhysicalEngine,
   GranularEngine,
-  SamplerEngine
+  SamplerEngine,
+  WavetableEngine
 ];
 var DEFAULT_ENGINE_ID = "analog";
 
@@ -3206,7 +3704,7 @@ var FX_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.2,
+      default: 0,
       curve: "linear",
       macro: 2,
       macroDepth: 0.7,
@@ -3294,7 +3792,7 @@ var FX_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.2,
+      default: 0,
       curve: "linear",
       mutability: 0.8,
       explain: "How much of the wobbling copies you hear against the original. At zero the chorus is bypassed exactly; past halfway the dry signal steps back and the sound starts to swim."
@@ -3354,7 +3852,7 @@ var FX_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.22,
+      default: 0,
       curve: "linear",
       macro: 3,
       macroDepth: 0.6,
@@ -3416,7 +3914,7 @@ var FX_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.25,
+      default: 0,
       curve: "linear",
       macro: 0,
       macroDepth: 0.7,
@@ -3440,7 +3938,7 @@ var FX_DESCRIPTOR = {
 
 // src/dsp/fx.ts
 var DENORMAL6 = 1e-20;
-var P_DRIVE3 = 0;
+var P_DRIVE4 = 0;
 var P_DRIVE_TONE = 1;
 var P_CRUSH_RATE = 2;
 var P_CRUSH_BITS = 3;
@@ -3702,7 +4200,7 @@ var FxChain = class {
   /** Descriptor units in, DSP units out. Runs per knob move, never per sample:
    *  every exp and pow in this effect lives here. */
   toDsp(i, v) {
-    if (i === P_DRIVE3) return v < 0 ? 0 : v > 1 ? 1 : v;
+    if (i === P_DRIVE4) return v < 0 ? 0 : v > 1 ? 1 : v;
     if (i === P_DRIVE_TONE) return (v * 2 - 1) * TILT_AMOUNT;
     if (i === P_CRUSH_RATE) return 1 / (1 + v * 63);
     if (i === P_CRUSH_BITS) return Math.pow(2, v - 1);
@@ -3745,7 +4243,7 @@ var FxChain = class {
       for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
       const dry = buffer[n];
       let x = dry;
-      const amt = v[P_DRIVE3];
+      const amt = v[P_DRIVE4];
       this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
       if (amt > 0) {
         const g = 1 + amt * DRIVE_MAX_G;
@@ -3771,11 +4269,11 @@ var FxChain = class {
 
 // src/dsp/fx-magic-descriptor.ts
 var DENORMAL7 = 1e-20;
-var TWO_PI6 = Math.PI * 2;
+var TWO_PI7 = Math.PI * 2;
 function flush2(x) {
   return x < DENORMAL7 && x > -DENORMAL7 ? 0 : x;
 }
-function saturate5(x) {
+function saturate6(x) {
   const x2 = x * x;
   return x * (27 + x2) / (27 + 9 * x2);
 }
@@ -3903,7 +4401,7 @@ var PitchShifter = class {
     else if (p >= w) p -= w;
     this.phase = p;
     const q = p < w * 0.5 ? p + w * 0.5 : p - w * 0.5;
-    const g = 0.5 - 0.5 * Math.cos(TWO_PI6 * p / w);
+    const g = 0.5 - 0.5 * Math.cos(TWO_PI7 * p / w);
     return g * this.line.read(p) + (1 - g) * this.line.read(q);
   }
 };
@@ -4009,7 +4507,7 @@ var FX_MAGIC_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.2,
+      default: 0,
       curve: "linear",
       macro: 1,
       macroDepth: 0.8,
@@ -4206,7 +4704,7 @@ var FX_MAGIC_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.15,
+      default: 0,
       curve: "linear",
       macro: 3,
       macroDepth: 0.8,
@@ -4220,7 +4718,7 @@ var FX_MAGIC_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.25,
+      default: 0,
       curve: "linear",
       mutability: 0.9,
       explain: "Slow pitch drift, about once a second, from a reel that is not perfectly round. A little makes sustained notes breathe instead of standing dead still; a lot sounds seasick and broken."
@@ -4232,7 +4730,7 @@ var FX_MAGIC_DESCRIPTOR = {
       unit: "pct",
       min: 0,
       max: 1,
-      default: 0.25,
+      default: 0,
       curve: "linear",
       mutability: 0.9,
       explain: 'Fast pitch wobble from the capstan and the guide rollers. Too quick to hear as pitch, so instead it adds a grainy unsteady texture that the ear reads as "recorded on something physical".'
@@ -4260,18 +4758,18 @@ var Tape = class {
     this.lp = 0;
   }
   process(x, wear, wow, flutter) {
-    this.wowPh += TWO_PI6 * 0.73 / this.sr;
-    if (this.wowPh > TWO_PI6) this.wowPh -= TWO_PI6;
-    this.fl1 += TWO_PI6 * 7.3 / this.sr;
-    if (this.fl1 > TWO_PI6) this.fl1 -= TWO_PI6;
-    this.fl2 += TWO_PI6 * 11.9 / this.sr;
-    if (this.fl2 > TWO_PI6) this.fl2 -= TWO_PI6;
+    this.wowPh += TWO_PI7 * 0.73 / this.sr;
+    if (this.wowPh > TWO_PI7) this.wowPh -= TWO_PI7;
+    this.fl1 += TWO_PI7 * 7.3 / this.sr;
+    if (this.fl1 > TWO_PI7) this.fl1 -= TWO_PI7;
+    this.fl2 += TWO_PI7 * 11.9 / this.sr;
+    if (this.fl2 > TWO_PI7) this.fl2 -= TWO_PI7;
     const mod = this.sr * (wow * 28e-4 * Math.sin(this.wowPh) + flutter * 35e-5 * (Math.sin(this.fl1) * 0.7 + Math.sin(this.fl2) * 0.3));
     this.line.write(x);
     const d = this.line.read(this.base + mod);
-    const hot = saturate5(d * (1 + wear * 5)) / (1 + wear * 1.6);
+    const hot = saturate6(d * (1 + wear * 5)) / (1 + wear * 1.6);
     const y = d + (hot - d) * wear;
-    let c = TWO_PI6 * (18e3 - 15200 * wear) / this.sr;
+    let c = TWO_PI7 * (18e3 - 15200 * wear) / this.sr;
     if (c > 0.99) c = 0.99;
     this.lp = flush2(this.lp + c * (y - this.lp));
     return this.lp;
@@ -4293,9 +4791,9 @@ var FreqShifter = class {
   }
   process(x, hz, ring) {
     this.hil.process(x);
-    let ph = this.phase + TWO_PI6 * hz / this.sr;
-    if (ph > Math.PI) ph -= TWO_PI6;
-    else if (ph < -Math.PI) ph += TWO_PI6;
+    let ph = this.phase + TWO_PI7 * hz / this.sr;
+    if (ph > Math.PI) ph -= TWO_PI7;
+    else if (ph < -Math.PI) ph += TWO_PI7;
     this.phase = ph;
     const c = Math.cos(ph), s = Math.sin(ph);
     return blend(this.hil.i * c + this.hil.q * s, x * c, ring);
@@ -4378,7 +4876,7 @@ var Shimmer = class {
   process(x, delay, fb, ratio, damp) {
     const tail = this.line.read(delay);
     this.z = flush2(this.z + (1 - damp * 0.92) * (tail - this.z));
-    let w = this.d2.process(this.d1.process(x + saturate5(this.shifter.process(this.z, ratio) * fb)));
+    let w = this.d2.process(this.d1.process(x + saturate6(this.shifter.process(this.z, ratio) * fb)));
     if (w > 4) w = 4;
     else if (w < -4) w = -4;
     this.line.write(flush2(w));
