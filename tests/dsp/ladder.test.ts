@@ -42,11 +42,20 @@ describe('LadderFilter', () => {
         const f = new LadderFilter(SR);
         f.setCutoff(cutoff);
         f.setResonance(res);
+        /*
+         * Scan first, assert once. Calling expect() 320,000 times across these
+         * nested loops was slow enough to blow the default timeout whenever the
+         * machine was busy, which made a deterministic stability test look
+         * flaky. Recording the first offender keeps the failure message just as
+         * useful.
+         */
+        let bad: { i: number; y: number } | null = null;
         for (let i = 0; i < 20000; i++) {
           const y = f.process(Math.sin(i * 0.1) * 2);
-          expect(Number.isFinite(y)).toBe(true);
-          expect(Math.abs(y)).toBeLessThan(50);
+          if (!Number.isFinite(y) || Math.abs(y) >= 50) { bad = { i, y }; break; }
         }
+        expect(bad, `cutoff ${cutoff}Hz res ${res} produced ${bad?.y} at sample ${bad?.i}`)
+          .toBeNull();
       }
     }
   });
