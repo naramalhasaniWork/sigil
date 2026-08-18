@@ -210,11 +210,28 @@ class SigilProcessor extends AudioWorkletProcessor {
     if (!output) return true;
     const left = output[0];
     if (!left) return true;
+    const right = output[1];
 
+    /*
+     * The voices are mono by design: six engines rendering two channels would
+     * double the synth's cost to buy width that the effects give away almost
+     * free. So the bus is rendered once into the left channel, copied across,
+     * and both FX chains widen it from there.
+     *
+     * The bounce path asks for a single output channel (outputChannelCount:[1]
+     * in src/audio/bounce.ts, because the KO II takes mono samples), and falls
+     * through to the mono entry points unchanged.
+     */
     left.fill(0);
     this.active.render(left, left.length);
-    this.fx.process(left, left.length);
-    this.magic.process(left, left.length);
+    if (right) {
+      right.set(left);
+      this.fx.processStereo(left, right, left.length);
+      this.magic.processStereo(left, right, left.length);
+    } else {
+      this.fx.process(left, left.length);
+      this.magic.process(left, left.length);
+    }
 
     if (this.releaseAtSample >= 0 && this.bounceNotes.length > 0) {
       this.samplesRendered += left.length;
@@ -224,17 +241,31 @@ class SigilProcessor extends AudioWorkletProcessor {
       }
     }
 
+    /*
+     * The capture stays MONO: the 'recording' message carries one Float32Array
+     * and the UI writes a mono WAV from it. Taking the fold rather than the left
+     * channel alone means a recording of a wide patch is the same downmix a
+     * phone speaker would produce, not half of one.
+     */
     if (this.capturing) {
       const room = this.captureBuf.length - this.captureLen;
       const n = left.length < room ? left.length : room;
-      for (let i = 0; i < n; i++) {
-        this.captureBuf[this.captureLen + i] = left[i] as number;
+      if (right) {
+        for (let i = 0; i < n; i++) {
+          this.captureBuf[this.captureLen + i] = ((left[i] as number) + (right[i] as number)) * 0.5;
+        }
+      } else {
+        for (let i = 0; i < n; i++) {
+          this.captureBuf[this.captureLen + i] = left[i] as number;
+        }
       }
       this.captureLen += n;
       if (this.captureLen >= this.captureBuf.length) this.finishCapture(true);
     }
 
-    for (let ch = 1; ch < output.length; ch++) {
+    // Anything past the first two channels gets the left signal; a surround
+    // context is not something this instrument claims to speak.
+    for (let ch = right ? 2 : 1; ch < output.length; ch++) {
       output[ch]?.set(left);
     }
     return true;

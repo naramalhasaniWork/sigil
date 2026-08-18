@@ -1,66 +1,26 @@
 import { Smoother } from '@/dsp/smoothing';
-import { FX_DESCRIPTOR } from './fx-descriptor';
-
-const DENORMAL = 1e-20;
+import {
+  Line, def, flush, lfo, onePole, sat,
+  N_PARAMS, P_DRIVE, P_DRIVE_TONE, P_CRUSH_RATE, P_CRUSH_BITS,
+  P_CH_RATE, P_CH_DEPTH, P_CH_WIDTH, P_CH_MIX,
+  P_DL_TIME, P_DL_FB, P_DL_TONE, P_DL_WIDTH, P_DL_MIX,
+  P_RV_PREDELAY, P_RV_SIZE, P_RV_DECAY, P_RV_DAMP, P_RV_MIX, P_TRIM,
+} from './fx-core';
+import { Reverb } from './fx-reverb';
 
 export interface FxUnit {
   setParam(index: number, value: number): void;
   /** Rewrites `buffer` in place. Allocates nothing. */
   process(buffer: Float32Array, count: number): void;
+  /** Rewrites both channels in place. Allocates nothing. The voices are mono,
+   *  so this chain is where the signal becomes stereo. */
+  processStereo(left: Float32Array, right: Float32Array, count: number): void;
   reset(): void;
 }
 
-const P_DRIVE = 0, P_DRIVE_TONE = 1, P_CRUSH_RATE = 2, P_CRUSH_BITS = 3;
-const P_CH_RATE = 4, P_CH_DEPTH = 5, P_CH_WIDTH = 6, P_CH_MIX = 7;
-const P_DL_TIME = 8, P_DL_FB = 9, P_DL_TONE = 10, P_DL_WIDTH = 11, P_DL_MIX = 12;
-const P_RV_PREDELAY = 13, P_RV_SIZE = 14, P_RV_DECAY = 15;
-const P_RV_DAMP = 16, P_RV_MIX = 17, P_TRIM = 18;
-
-const N_PARAMS = FX_DESCRIPTOR.params.length;
 /** Per-parameter smoothing. Delay time and reverb size move a read pointer so
  *  they glide; mixes and gains only need de-zippering. */
 const SMOOTH_MS = [25, 25, 25, 25, 30, 30, 30, 30, 80, 30, 30, 60, 30, 120, 120, 30, 40, 30, 25];
-
-function def(i: number): number { return FX_DESCRIPTOR.params[i]?.default ?? 0; }
-function flush(x: number): number { return x > -DENORMAL && x < DENORMAL ? 0 : x; }
-
-/** The ladder's rational tanh, input-clamped so it is genuinely bounded to ±1
- *  (the bare rational form starts climbing again past |x| = 3). */
-function sat(x: number): number {
-  const c = x > 3 ? 3 : x < -3 ? -3 : x, c2 = c * c;
-  return (c * (27 + c2)) / (27 + 9 * c2);
-}
-/** Parabolic sine over phase 0..1 — no transcendentals in the sample loop. */
-function lfo(p: number): number {
-  const t = p * 2 - 1;
-  return 4 * t * (t < 0 ? 1 + t : 1 - t);
-}
-/** One-pole coefficient for a cutoff in Hz. Only ever called at param rate. */
-function onePole(hz: number, sr: number): number {
-  const c = 1 - Math.exp((-2 * Math.PI * hz) / sr);
-  return c > 0.999 ? 0.999 : c < 1e-4 ? 1e-4 : c;
-}
-
-/** Power-of-two circular buffer, linear-interpolated fractional reads. The
- *  interpolation buys a read pointer that can move without clicking. */
-class Line {
-  private readonly buf: Float32Array; private readonly mask: number;
-  private w = 0;
-  constructor(maxSamples: number) {
-    let n = 4;
-    while (n < maxSamples + 4) n <<= 1;
-    this.buf = new Float32Array(n);
-    this.mask = n - 1;
-  }
-  write(x: number): void { this.buf[this.w] = x; this.w = (this.w + 1) & this.mask; }
-  read(d: number): number {
-    const lim = this.mask - 2, c = d < 1 ? 1 : d > lim ? lim : d, k = c | 0;
-    const a = this.buf[(this.w - k) & this.mask] as number;
-    const b = this.buf[(this.w - k - 1) & this.mask] as number;
-    return a + (b - a) * (c - k);
-  }
-  clear(): void { this.buf.fill(0); this.w = 0; }
-}
 
 const CH_MID_MS = 12, CH_SPREAD_MS = 7, CH_DEPTH_MS = 3.5, CH_DRY_CUT = 0.4, CH_WET_G = 0.55;
 /** Three taps off one modulated line, each with its own LFO phase and (once
@@ -69,6 +29,7 @@ class Chorus {
   private readonly line: Line;
   private readonly phase = new Float32Array(3);
   private readonly mid: number; private readonly spread: number; private readonly depth: number;
+  oL = 0; oR = 0;
   constructor(sr: number) {
     this.line = new Line(Math.ceil(sr * 0.05));
     this.mid = (CH_MID_MS * sr) / 1000; this.spread = (CH_SPREAD_MS * sr) / 1000;
@@ -78,6 +39,7 @@ class Chorus {
   reset(): void {
     this.line.clear();
     this.phase[0] = 0; this.phase[1] = 1 / 3; this.phase[2] = 2 / 3;
+    this.oL = 0; this.oR = 0;
   }
   process(x: number, p: Float32Array): number {
     const r = p[P_CH_RATE] as number, d = (p[P_CH_DEPTH] as number) * this.depth;
@@ -92,19 +54,49 @@ class Chorus {
     this.line.write(x);
     return x * (1 - CH_DRY_CUT * m) + wet * (m * CH_WET_G);
   }
+  /**
+   * Same three taps, read twice: the right channel's modulation runs half a
+   * cycle out of phase with the left's, so the two sides pull away from each
+   * other in opposite directions instead of wobbling together. Width fades the
+   * antiphase in, and at zero the two reads land on identical delays — the
+   * channels are then bit-identical, not merely close.
+   *
+   * No cancellation risk: both sides are delayed copies of the same line with a
+   * positive sign, so the mono fold is a comb, never a subtraction.
+   */
+  processStereo(l: number, r: number, p: Float32Array): void {
+    const rate = p[P_CH_RATE] as number, d = (p[P_CH_DEPTH] as number) * this.depth;
+    const w = p[P_CH_WIDTH] as number, m = p[P_CH_MIX] as number;
+    let wetL = 0, wetR = 0;
+    for (let i = 0; i < 3; i++) {
+      let ph = (this.phase[i] as number) + rate * (1 + (i - 1) * 0.28 * w);
+      if (ph >= 1) ph -= 1;
+      this.phase[i] = ph;
+      const base = this.mid + (i - 1) * this.spread * w;
+      const mod = d * lfo(ph);
+      const anti = d * lfo(ph >= 0.5 ? ph - 0.5 : ph + 0.5);
+      wetL += this.line.read(base + mod);
+      wetR += this.line.read(base + mod + (anti - mod) * w);
+    }
+    this.line.write((l + r) * 0.5);
+    const dry = 1 - CH_DRY_CUT * m, g = m * CH_WET_G;
+    this.oL = l * dry + wetL * g;
+    this.oR = r * dry + wetR * g;
+  }
 }
 
 const DL_MAX_S = 2.05;
 /** Regeneration ceiling. The two-line cross-feed matrix has spectral radius
  *  exactly this at every width setting, so the delay can never run away. */
-const DL_FB_MAX = 0.92;
+const DL_FB_MAX = 0.92, DL_WET_G = 0.7;
 class Delay {
   private readonly a: Line; private readonly b: Line;
   private lpA = 0; private lpB = 0;
+  oL = 0; oR = 0;
   constructor(sr: number) {
     this.a = new Line(Math.ceil(sr * DL_MAX_S)); this.b = new Line(Math.ceil(sr * DL_MAX_S));
   }
-  reset(): void { this.a.clear(); this.b.clear(); this.lpA = 0; this.lpB = 0; }
+  reset(): void { this.a.clear(); this.b.clear(); this.lpA = 0; this.lpB = 0; this.oL = 0; this.oR = 0; }
   process(x: number, p: Float32Array): number {
     const t = p[P_DL_TIME] as number, f = p[P_DL_FB] as number;
     const c = p[P_DL_TONE] as number, w = p[P_DL_WIDTH] as number;
@@ -116,100 +108,32 @@ class Delay {
     this.lpB = flush(this.lpB + c * (rb - this.lpB));
     this.a.write(flush(x + f * (w * this.lpB + (1 - w) * this.lpA)));
     this.b.write(flush(f * (w * this.lpA + (1 - w) * this.lpB)));
-    return x + (p[P_DL_MIX] as number) * 0.7 * (ra + rb);
+    return x + (p[P_DL_MIX] as number) * DL_WET_G * (ra + rb);
   }
-}
-
-const FDN_N = 8, AP_N = 4;
-/** Mutually prime at 48k, 23–63 ms. Primes push the coincidences between echoes
- *  as far apart as they go; equal or harmonically related lengths are exactly
- *  what makes a cheap FDN ring like a steel pipe. */
-const FDN_LEN = [1123, 1367, 1621, 1889, 2179, 2467, 2789, 3037];
-/** Schroeder allpass diffusers ahead of the network. Without them the early
- *  response is a handful of bare echoes, and no tail rescues that. */
-const AP_LEN = [67, 131, 229, 367];
-const AP_G = 0.55, HAD = 0.3535533905932738;
-const RV_MAX_G = 0.94, RV_MOD = 1.6, RV_IN = 0.5;
-function hadamard8(v: Float32Array): void {
-  for (let s = 1; s < FDN_N; s <<= 1) {
-    for (let i = 0; i < FDN_N; i += s << 1) {
-      for (let j = i; j < i + s; j++) {
-        const a = v[j] as number, b = v[j + s] as number;
-        v[j] = a + b; v[j + s] = a - b;
-      }
-    }
-  }
-  for (let i = 0; i < FDN_N; i++) v[i] = (v[i] as number) * HAD;
-}
-
-/** Pre-delay, four allpass diffusers, then eight damped delay lines mixed by an
- *  orthonormal Hadamard matrix. The matrix preserves energy exactly, so loop
- *  gain is just the largest line gain: hold it under 1 and decay is a theorem. */
-class Reverb {
-  private readonly sr: number; private readonly pre: Line;
-  private readonly ap: Line[] = []; private readonly apLen = new Float32Array(AP_N);
-  private readonly line: Line[] = [];
-  private readonly len = new Float32Array(FDN_N); private readonly gain = new Float32Array(FDN_N);
-  private readonly lp = new Float32Array(FDN_N); private readonly v = new Float32Array(FDN_N);
-  private readonly ph = new Float32Array(FDN_N); private readonly inc = new Float32Array(FDN_N);
-  constructor(sr: number) {
-    this.sr = sr;
-    const k = sr / 48000;
-    this.pre = new Line(Math.ceil(sr * 0.2));
-    for (let i = 0; i < AP_N; i++) {
-      const l = (AP_LEN[i] as number) * k;
-      this.apLen[i] = l; this.ap.push(new Line(Math.ceil(l) + 4));
-    }
-    for (let i = 0; i < FDN_N; i++) {
-      const l = (FDN_LEN[i] as number) * k;
-      this.len[i] = l; this.inc[i] = (0.31 + i * 0.07) / sr;
-      this.line.push(new Line(Math.ceil(l) + 8));
-    }
-    this.setDecay(def(P_RV_SIZE), def(P_RV_DECAY));
-    this.reset();
-  }
-
-  /** Per-line gain for a -60 dB tail. A step in feedback gain changes the decay
-   *  rate, not the waveform, so unlike everything else it needs no smoothing. */
-  setDecay(size: number, decayMs: number): void {
-    const dec = (decayMs / 1000) * this.sr;
-    for (let i = 0; i < FDN_N; i++) {
-      const g = Math.pow(10, (-3 * (this.len[i] as number) * size) / dec);
-      this.gain[i] = g > RV_MAX_G ? RV_MAX_G : g;
-    }
-  }
-  reset(): void {
-    this.pre.clear();
-    for (let i = 0; i < AP_N; i++) (this.ap[i] as Line).clear();
-    for (let i = 0; i < FDN_N; i++) { (this.line[i] as Line).clear(); this.ph[i] = i / FDN_N; }
-    this.lp.fill(0); this.v.fill(0);
-  }
-  process(x: number, p: Float32Array): number {
-    const s = p[P_RV_SIZE] as number, dp = p[P_RV_DAMP] as number;
-    let d = this.pre.read(p[P_RV_PREDELAY] as number);
-    this.pre.write(x);
-    for (let i = 0; i < AP_N; i++) {
-      const ln = this.ap[i] as Line;
-      const bo = ln.read(this.apLen[i] as number), vv = flush(d + AP_G * bo);
-      ln.write(vv); d = bo - AP_G * vv;
-    }
-    let wet = 0;
-    for (let i = 0; i < FDN_N; i++) {
-      let ph = (this.ph[i] as number) + (this.inc[i] as number);
-      if (ph >= 1) ph -= 1;
-      this.ph[i] = ph;
-      // A sliver of movement on every read stops the modes parking on fixed
-      // frequencies — the difference between air and metal.
-      const r = (this.line[i] as Line).read((this.len[i] as number) * s + RV_MOD * lfo(ph));
-      wet += r;
-      const l = flush((this.lp[i] as number) + dp * (r - (this.lp[i] as number)));
-      this.lp[i] = l;
-      this.v[i] = l * (this.gain[i] as number);
-    }
-    hadamard8(this.v);
-    const inj = d * RV_IN;
-    for (let i = 0; i < FDN_N; i++) (this.line[i] as Line).write(flush(inj + (this.v[i] as number)));
-    return x + (p[P_RV_MIX] as number) * wet * HAD;
+  /**
+   * Real ping-pong. Both lines run at the same time now — the mono version's
+   * time offset only existed because bouncing in space is invisible in one
+   * channel. Line A goes to the left, line B to the right, and width steers two
+   * things at once: how much dry lands in B, and how much of each line's
+   * feedback comes from the other. At width 0 the two lines are fed identically
+   * and stay sample-identical, so the delay collapses to plain mono; at 1, A is
+   * the only line taking input and hands every repeat across to B and back.
+   *
+   * Stable at every setting: the feedback matrix f·[[1−w, w], [w, 1−w]] has
+   * eigenvalues f and f(1−2w), so its spectral radius is f regardless of width.
+   */
+  processStereo(l: number, r: number, p: Float32Array): void {
+    const t = p[P_DL_TIME] as number, f = p[P_DL_FB] as number;
+    const c = p[P_DL_TONE] as number, w = p[P_DL_WIDTH] as number;
+    const ra = this.a.read(t), rb = this.b.read(t);
+    this.lpA = flush(this.lpA + c * (ra - this.lpA));
+    this.lpB = flush(this.lpB + c * (rb - this.lpB));
+    const x = (l + r) * 0.5;
+    this.a.write(flush(x + f * (w * this.lpB + (1 - w) * this.lpA)));
+    this.b.write(flush(x * (1 - w) + f * (w * this.lpA + (1 - w) * this.lpB)));
+    const g = (p[P_DL_MIX] as number) * DL_WET_G;
+    this.oL = l + g * ra;
+    this.oR = r + g * rb;
   }
 }
 
@@ -225,6 +149,9 @@ export class FxChain implements FxUnit {
   private wasChorus = false;
   private wasDelay = false;
   private wasReverb = false;
+  private onChorus = false;
+  private onDelay = false;
+  private onReverb = false;
   private readonly sm: Smoother[] = []; private readonly target = new Float32Array(N_PARAMS);
   /** Smoothed, in DSP units — the only path into the DSP, so an un-smoothed
    *  parameter is structurally impossible. */
@@ -237,7 +164,8 @@ export class FxChain implements FxUnit {
     this.sr = sampleRate;
     for (let i = 0; i < N_PARAMS; i++) this.sm.push(new Smoother(sampleRate, SMOOTH_MS[i] ?? 25));
     this.chorus = new Chorus(sampleRate); this.delay = new Delay(sampleRate);
-    this.reverb = new Reverb(sampleRate); this.tiltC = onePole(TILT_HZ, sampleRate);
+    this.reverb = new Reverb(sampleRate, def(P_RV_SIZE), def(P_RV_DECAY));
+    this.tiltC = onePole(TILT_HZ, sampleRate);
     for (let i = 0; i < N_PARAMS; i++) this.setParam(i, def(i));
     this.reset();
   }
@@ -276,6 +204,7 @@ export class FxChain implements FxUnit {
     }
     this.chorus.reset(); this.delay.reset(); this.reverb.reset();
   }
+
   /**
    * PERFORMANCE: chorus, delay and reverb are skipped when their mix is silent.
    *
@@ -284,42 +213,76 @@ export class FxChain implements FxUnit {
    * unit, because its delay lines still hold audio from before the bypass and
    * fading that in would burst stale sound.
    */
+  private gate(): void {
+    const v = this.v, sm = this.sm;
+    for (let i = 0; i < N_PARAMS; i++) v[i] = (sm[i] as Smoother).next();
+    this.onChorus = (v[P_CH_MIX] as number) > SILENT;
+    this.onDelay = (v[P_DL_MIX] as number) > SILENT;
+    this.onReverb = (v[P_RV_MIX] as number) > SILENT;
+    if (this.onChorus && !this.wasChorus) this.chorus.reset();
+    if (this.onDelay && !this.wasDelay) this.delay.reset();
+    if (this.onReverb && !this.wasReverb) this.reverb.reset();
+    this.wasChorus = this.onChorus; this.wasDelay = this.onDelay; this.wasReverb = this.onReverb;
+  }
+
+  /** Drive and bitcrush: memoryless-plus-tilt, and inherently one-channel. In
+   *  stereo they run on the mid and the side passes them by, which is exactly
+   *  what they do to a mono bus and costs nothing extra. */
+  private front(dry: number, v: Float32Array): number {
+    let x = dry;
+    const amt = v[P_DRIVE] as number;
+    this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
+    if (amt > 0) {
+      const g = 1 + amt * DRIVE_MAX_G;
+      const shaped = x + (v[P_DRIVE_TONE] as number) * (x - this.tilt);
+      const w = (sat(shaped * g) * DRIVE_REF) / sat(DRIVE_REF * g);
+      // Blended in, so drive at zero is bit-exact bypass rather than "nearly".
+      x = dry + (w - dry) * (amt * (2 - amt));
+    }
+    this.acc += v[P_CRUSH_RATE] as number;
+    if (this.acc >= 1) { this.acc -= 1; this.held = x; }
+    const half = v[P_CRUSH_BITS] as number;
+    return Math.floor(this.held * half + 0.5) / half;
+  }
+
   process(buffer: Float32Array, count: number): void {
     const v = this.v, sm = this.sm;
-
-    // Decide what is live once per block rather than per sample.
-    for (let i = 0; i < N_PARAMS; i++) v[i] = (sm[i] as Smoother).next();
-    const onChorus = (v[P_CH_MIX] as number) > SILENT;
-    const onDelay = (v[P_DL_MIX] as number) > SILENT;
-    const onReverb = (v[P_RV_MIX] as number) > SILENT;
-
-    if (onChorus && !this.wasChorus) this.chorus.reset();
-    if (onDelay && !this.wasDelay) this.delay.reset();
-    if (onReverb && !this.wasReverb) this.reverb.reset();
-    this.wasChorus = onChorus; this.wasDelay = onDelay; this.wasReverb = onReverb;
-
+    this.gate();
+    const onChorus = this.onChorus, onDelay = this.onDelay, onReverb = this.onReverb;
     for (let n = 0; n < count; n++) {
       for (let i = 0; i < N_PARAMS; i++) v[i] = (sm[i] as Smoother).next();
-      const dry = buffer[n] as number;
-      let x = dry;
-      const amt = v[P_DRIVE] as number;
-      this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
-      if (amt > 0) {
-        const g = 1 + amt * DRIVE_MAX_G;
-        const shaped = x + (v[P_DRIVE_TONE] as number) * (x - this.tilt);
-        const w = (sat(shaped * g) * DRIVE_REF) / sat(DRIVE_REF * g);
-        // Blended in, so drive at zero is bit-exact bypass rather than "nearly".
-        x = dry + (w - dry) * (amt * (2 - amt));
-      }
-      this.acc += v[P_CRUSH_RATE] as number;
-      if (this.acc >= 1) { this.acc -= 1; this.held = x; }
-      const half = v[P_CRUSH_BITS] as number;
-      x = Math.floor(this.held * half + 0.5) / half;
+      let x = this.front(buffer[n] as number, v);
       if (onChorus) x = this.chorus.process(x, v);
       if (onDelay) x = this.delay.process(x, v);
       if (onReverb) x = this.reverb.process(x, v);
       x = sat((x * (v[P_TRIM] as number)) / LIMIT) * LIMIT;
       buffer[n] = x === x ? x : 0;
+    }
+  }
+
+  /**
+   * The stereo entry point. Width lives here, not in the oscillators: six
+   * engines rendering two channels would double the synth's cost to buy
+   * something the effects give away nearly free.
+   */
+  processStereo(left: Float32Array, right: Float32Array, count: number): void {
+    const v = this.v, sm = this.sm;
+    this.gate();
+    const onChorus = this.onChorus, onDelay = this.onDelay, onReverb = this.onReverb;
+    const ch = this.chorus, dl = this.delay, rv = this.reverb;
+    for (let n = 0; n < count; n++) {
+      for (let i = 0; i < N_PARAMS; i++) v[i] = (sm[i] as Smoother).next();
+      const li = left[n] as number, ri = right[n] as number;
+      const mid = this.front((li + ri) * 0.5, v);
+      const side = (li - ri) * 0.5;
+      let l = mid + side, r = mid - side;
+      if (onChorus) { ch.processStereo(l, r, v); l = ch.oL; r = ch.oR; }
+      if (onDelay) { dl.processStereo(l, r, v); l = dl.oL; r = dl.oR; }
+      if (onReverb) { rv.processStereo(l, r, v); l = rv.oL; r = rv.oR; }
+      const trim = (v[P_TRIM] as number) / LIMIT;
+      l = sat(l * trim) * LIMIT; r = sat(r * trim) * LIMIT;
+      left[n] = l === l ? l : 0;
+      right[n] = r === r ? r : 0;
     }
   }
 }

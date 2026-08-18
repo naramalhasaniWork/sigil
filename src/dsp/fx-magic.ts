@@ -1,10 +1,8 @@
 import { Smoother } from '@/dsp/smoothing';
-import { StateVariableFilter } from '@/dsp/filters';
 import {
-  DelayLine, Diffuser, FreqShifter, PitchShifter, Tape, blend, copyTail,
-  FORMANT_LOG, FX_MAGIC_DESCRIPTOR, MAGIC_PARAM as P,
-  flush, saturate, softLimit,
+  FreqShifter, Tape, blend, FX_MAGIC_DESCRIPTOR, MAGIC_PARAM as P, softLimit,
 } from '@/dsp/fx-magic-descriptor';
+import { Freezer, Shimmer, Stutter, VowelFilter } from '@/dsp/fx-magic-units';
 
 /**
  * SIGIL — the character effects. The conventional chain makes a sound sit
@@ -16,198 +14,9 @@ export interface MagicFx {
   setParam(index: number, value: number): void;
   /** In place, zero allocation. */
   process(buffer: Float32Array, count: number): void;
+  /** Both channels in place, zero allocation. */
+  processStereo(left: Float32Array, right: Float32Array, count: number): void;
   reset(): void;
-}
-
-/**
- * FREEZE. Captures the last N ms and loops it forever while you keep playing
- * over the top — a sound suspended in mid-air. The loop point is a raised
- * cosine splice a quarter of the buffer long, so the join is continuous in
- * value and in slope, and the read pointer is an integer, so it cannot drift.
- */
-class Freezer {
-  private readonly ring: Float32Array; private readonly loop: Float32Array;
-  private readonly max: number; private readonly gain: Smoother;
-  private w = 0; private len = 0; private xf = 1; private p = 0; private held = false;
-  constructor(sr: number) {
-    this.max = Math.round(sr * 2);
-    this.ring = new Float32Array(this.max);
-    this.loop = new Float32Array(this.max);
-    this.gain = new Smoother(sr, 15);
-  }
-  release(): void { this.held = false; }
-  reset(): void {
-    this.ring.fill(0); this.loop.fill(0); this.gain.snap(0);
-    this.w = 0; this.len = 0; this.p = 0; this.held = false;
-  }
-  capture(lenSamples: number): void {
-    const L = Math.max(128, Math.min(this.max, Math.round(lenSamples)));
-    copyTail(this.ring, this.w, this.loop, L);
-    // Crossfade scales with the capture: long holds get a long, invisible
-    // splice; short ones stay short enough not to smear into mush.
-    this.xf = Math.max(1, Math.floor(L * 0.25));
-    this.len = L - this.xf;
-    this.p = 0;
-    this.held = true;
-  }
-  process(x: number): number {
-    this.ring[this.w] = x;
-    this.w++; if (this.w >= this.max) this.w = 0;
-    this.gain.setTarget(this.held ? 1 : 0);
-    const g = this.gain.next();
-    if (g === 0 || this.len <= 0) return 0;
-    const p = this.p;
-    let y = this.loop[p] as number;
-    if (p < this.xf) {
-      const t = 0.5 - 0.5 * Math.cos((Math.PI * p) / this.xf);
-      y = y * t + (this.loop[p + this.len] as number) * (1 - t);
-    }
-    this.p = p + 1 >= this.len ? 0 : p + 1;
-    return y * g;
-  }
-}
-
-/**
- * SHIMMER. A diffused delay tank with a pitch shifter inside the feedback path,
- * so every pass arrives an octave above the last and the tail blooms upward
- * into a cathedral. Feedback is clamped below unity and the loop soft-saturated,
- * so it always decays however hard you push it.
- */
-class Shimmer {
-  private readonly line: DelayLine; private readonly shifter: PitchShifter;
-  private readonly d1: Diffuser; private readonly d2: Diffuser;
-  private z = 0;
-  constructor(sr: number) {
-    this.line = new DelayLine(Math.round(sr * 0.55));
-    this.shifter = new PitchShifter(sr, 60);
-    this.d1 = new Diffuser(sr * 0.00723, 0.62);
-    this.d2 = new Diffuser(sr * 0.01043, 0.55);
-  }
-  reset(): void {
-    this.line.reset(); this.shifter.reset(); this.d1.reset(); this.d2.reset(); this.z = 0;
-  }
-  process(x: number, delay: number, fb: number, ratio: number, damp: number): number {
-    const tail = this.line.read(delay);
-    this.z = flush(this.z + (1 - damp * 0.92) * (tail - this.z));
-    let w = this.d2.process(this.d1.process(x + saturate(this.shifter.process(this.z, ratio) * fb)));
-    if (w > 4) w = 4; else if (w < -4) w = -4;
-    this.line.write(flush(w));
-    return tail;
-  }
-}
-
-/**
- * VOWEL. Three resonant bandpasses parked on real formant centres, morphing
- * continuously through A-E-I-O-U. Coefficients only move when the morph moves,
- * which keeps three tan() calls out of most samples.
- */
-class VowelFilter {
-  private readonly f: StateVariableFilter[] = [];
-  private lastPos = -1; private lastSharp = -1;
-  constructor(sr: number) {
-    for (let k = 0; k < 3; k++) {
-      const s = new StateVariableFilter(sr);
-      s.setMode('bp');
-      this.f.push(s);
-    }
-  }
-  reset(): void {
-    for (let k = 0; k < 3; k++) (this.f[k] as StateVariableFilter).reset();
-    this.lastPos = -1; this.lastSharp = -1;
-  }
-  process(x: number, pos: number, sharp: number): number {
-    if (Math.abs(pos - this.lastPos) > 0.002 || Math.abs(sharp - this.lastSharp) > 0.005) {
-      this.lastPos = pos; this.lastSharp = sharp;
-      const t = (pos < 0 ? 0 : pos > 1 ? 1 : pos) * 4;
-      let i = Math.floor(t); if (i > 3) i = 3;
-      const frac = t - i;
-      const a = i * 3;
-      for (let k = 0; k < 3; k++) {
-        const lo = FORMANT_LOG[a + k] as number;
-        const hi = FORMANT_LOG[a + 3 + k] as number;
-        const flt = this.f[k] as StateVariableFilter;
-        flt.setCutoff(Math.exp(lo + (hi - lo) * frac));
-        flt.setResonance(0.55 + 0.42 * sharp);
-      }
-    }
-    const b0 = (this.f[0] as StateVariableFilter).process(x);
-    const b1 = (this.f[1] as StateVariableFilter).process(x);
-    const b2 = (this.f[2] as StateVariableFilter).process(x);
-    return (b0 + b1 * 0.55 + b2 * 0.3) * 0.45;
-  }
-}
-
-/**
- * STUTTER. Catches a slice and repeats it. Whether it catches is a coin toss
- * from a seeded PRNG — never Math.random(), so a take is reproducible and a
- * test can assert on it — which is the difference between an effect that
- * glitches and one that merely chops on the grid.
- */
-class Stutter {
-  private readonly ring: Float32Array; private readonly slice: Float32Array;
-  private readonly max: number; private readonly fade: number;
-  private w = 0; private counter = 0; private active = false;
-  private phase = 0; private rate = 1; private repeats = 0; private len = 0;
-  private s = 1337 >>> 0;
-  constructor(sr: number) {
-    this.max = Math.round(sr * 0.5);
-    this.ring = new Float32Array(this.max);
-    this.slice = new Float32Array(this.max);
-    this.fade = Math.max(4, Math.round(sr * 0.002));
-  }
-  setSeed(seed: number): void {
-    this.s = (Math.round(seed) >>> 0) || 1;
-    this.active = false; this.counter = 0;
-  }
-  reset(): void {
-    this.ring.fill(0); this.slice.fill(0);
-    this.w = 0; this.counter = 0; this.active = false; this.phase = 0; this.rate = 1;
-  }
-  /** mulberry32: small, fast, seeded, identical every run. */
-  private rand(): number {
-    this.s = (this.s + 0x6d2b79f5) >>> 0;
-    let t = this.s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  }
-  private latch(n: number): void {
-    const L = Math.max(32, Math.min(this.max, Math.round(n)));
-    copyTail(this.ring, this.w, this.slice, L);
-    this.len = L; this.phase = 0; this.rate = 1;
-    this.repeats = 2 + Math.floor(this.rand() * 4);
-    this.active = true;
-  }
-  process(x: number, sliceSamples: number, chance: number, pitchRatio: number): number {
-    this.ring[this.w] = x;
-    this.w++; if (this.w >= this.max) this.w = 0;
-    if (!this.active) {
-      this.counter++;
-      if (this.counter >= sliceSamples) {
-        this.counter = 0;
-        if (this.rand() < chance) this.latch(sliceSamples);
-      }
-      if (!this.active) return x;
-    }
-    const n = this.len;
-    let ph = this.phase;
-    const i0 = Math.floor(ph);
-    const a = this.slice[i0 % n] as number;
-    const b = this.slice[(i0 + 1) % n] as number;
-    let y = a + (b - a) * (ph - i0);
-    const fd = this.fade;
-    if (ph < fd) y *= ph / fd; else if (ph > n - fd) y *= (n - ph) / fd;
-    ph += this.rate;
-    if (ph >= n) {
-      ph -= n;
-      this.repeats--;
-      this.rate *= pitchRatio;
-      if (this.rate < 0.25) this.rate = 0.25; else if (this.rate > 4) this.rate = 4;
-      if (this.repeats <= 0) { this.active = false; this.counter = 0; }
-    }
-    this.phase = ph;
-    return y;
-  }
 }
 
 /** The six character effects in series, every parameter smoothed. */
@@ -223,6 +32,11 @@ export class MagicChain implements MagicFx {
   private wasStutter = false;
   private wasShimmer = false;
   private wasTape = false;
+  private onVowel = false; private onShift = false; private onStutter = false;
+  private onShimmer = false; private onFreeze = false; private onTape = false;
+  private anyOn = false;
+  private stutterRatio = 1; private shimmerRatio = 1;
+  private stutterSlice = 0; private shimmerSize = 0; private shimmerFb = 0;
 
   private readonly sr: number;
   private readonly sm: Smoother[] = [];
@@ -272,6 +86,7 @@ export class MagicChain implements MagicFx {
     this.vowel.reset(); this.stutter.reset(); this.tape.reset();
     this.held = false; this.wantCapture = false; this.wantRelease = false;
   }
+
   /**
    * PERFORMANCE: each unit is skipped entirely when its mix is silent.
    *
@@ -286,51 +101,65 @@ export class MagicChain implements MagicFx {
    * Re-enabling a unit resets it. Its delay lines hold audio from before the
    * bypass, and fading that back in would burst stale sound — nothing was
    * audible at mix zero, so there is no continuity worth preserving.
+   *
+   * Gate on the TARGET as well as the current value. Hoisting the smoother
+   * stepping out of the sample loop made parameter smoothing 128x slower — a
+   * knob move would have taken about a third of a second to arrive — so the
+   * per-sample stepping stays and the decision looks at where each mix is
+   * heading. A unit is live while it is on, still ramping up, or ramping down
+   * and not yet silent.
    */
-  process(buffer: Float32Array, count: number): void {
+  private prepare(): void {
     if (this.wantCapture) {
       this.freezer.capture((this.freezeLenMs / 1000) * this.sr);
       this.wantCapture = false;
     }
     if (this.wantRelease) { this.freezer.release(); this.wantRelease = false; }
 
-    const v = this.val;
-    const np = v.length;
-    const sr = this.sr;
-
-    /*
-     * Gate on the TARGET as well as the current value. Hoisting the smoother
-     * stepping out of the sample loop made parameter smoothing 128x slower — a
-     * knob move would have taken about a third of a second to arrive — so the
-     * per-sample stepping stays and the decision looks at where each mix is
-     * heading. `live` is true while a unit is on, still ramping up, or ramping
-     * down and not yet silent.
-     */
-    const t = this.tgt;
+    const v = this.val, t = this.tgt;
     const live = (idx: number): boolean =>
       (v[idx] as number) > SILENT || (t[idx] as number) > SILENT;
 
-    const onVowel = live(P.vowelMix);
-    const onShift = live(P.shiftMix);
-    const onStutter = live(P.stutterMix);
-    const onShimmer = live(P.shimmerMix);
-    const onFreeze = live(P.freezeMix);
-    const onTape = live(P.tapeWear) || live(P.tapeWow) || live(P.tapeFlutter);
+    this.onVowel = live(P.vowelMix);
+    this.onShift = live(P.shiftMix);
+    this.onStutter = live(P.stutterMix);
+    this.onShimmer = live(P.shimmerMix);
+    this.onFreeze = live(P.freezeMix);
+    this.onTape = live(P.tapeWear) || live(P.tapeWow) || live(P.tapeFlutter);
 
-    if (onVowel && !this.wasVowel) this.vowel.reset();
-    if (onShift && !this.wasShift) this.shifter.reset();
-    if (onStutter && !this.wasStutter) this.stutter.reset();
-    if (onShimmer && !this.wasShimmer) this.shimmer.reset();
-    if (onTape && !this.wasTape) this.tape.reset();
-    this.wasVowel = onVowel; this.wasShift = onShift; this.wasStutter = onStutter;
-    this.wasShimmer = onShimmer; this.wasTape = onTape;
+    if (this.onVowel && !this.wasVowel) this.vowel.reset();
+    if (this.onShift && !this.wasShift) this.shifter.reset();
+    if (this.onStutter && !this.wasStutter) this.stutter.reset();
+    if (this.onShimmer && !this.wasShimmer) this.shimmer.reset();
+    if (this.onTape && !this.wasTape) this.tape.reset();
+    this.wasVowel = this.onVowel; this.wasShift = this.onShift;
+    this.wasStutter = this.onStutter; this.wasShimmer = this.onShimmer;
+    this.wasTape = this.onTape;
+
+    this.anyOn = this.onVowel || this.onShift || this.onStutter
+      || this.onShimmer || this.onFreeze || this.onTape;
+    if (!this.anyOn) return;
+
+    // Transcendentals hoisted to block rate. Two `2 ** x` per SAMPLE violated
+    // the project's own hot-loop rule and bought nothing: both derive from
+    // smoothed parameters that barely move within a 128-sample block.
+    this.stutterRatio = 2 ** ((t[P.stutterPitch] as number) / 12);
+    this.shimmerRatio = 2 ** ((t[P.shimmerPitch] as number) / 12);
+    this.stutterSlice = ((t[P.stutterSlice] as number) / 1000) * this.sr;
+    this.shimmerSize = ((t[P.shimmerSize] as number) / 1000) * this.sr;
+    this.shimmerFb = (t[P.shimmerFeedback] as number) * 0.85;
+  }
+
+  process(buffer: Float32Array, count: number): void {
+    this.prepare();
+    const v = this.val, np = v.length;
 
     /*
      * Fully bypassed. The freezer still needs feeding so a later capture has
      * material, but that is a ring-buffer write per sample rather than the six
      * effects, and the samples pass through untouched.
      */
-    if (!onVowel && !onShift && !onStutter && !onShimmer && !onFreeze && !onTape) {
+    if (!this.anyOn) {
       for (let i = 0; i < count; i++) {
         for (let k = 0; k < np; k++) v[k] = (this.sm[k] as Smoother).next();
         this.freezer.process(buffer[i] as number);
@@ -338,14 +167,11 @@ export class MagicChain implements MagicFx {
       return;
     }
 
-    // Transcendentals hoisted to block rate. Two `2 ** x` per SAMPLE violated
-    // the project's own hot-loop rule and bought nothing: both derive from
-    // smoothed parameters that barely move within a 128-sample block.
-    const stutterRatio = 2 ** ((t[P.stutterPitch] as number) / 12);
-    const shimmerRatio = 2 ** ((t[P.shimmerPitch] as number) / 12);
-    const stutterSlice = ((t[P.stutterSlice] as number) / 1000) * sr;
-    const shimmerSize = ((t[P.shimmerSize] as number) / 1000) * sr;
-    const shimmerFb = (t[P.shimmerFeedback] as number) * 0.85;
+    const onVowel = this.onVowel, onShift = this.onShift, onStutter = this.onStutter;
+    const onShimmer = this.onShimmer, onFreeze = this.onFreeze, onTape = this.onTape;
+    const stutterSlice = this.stutterSlice, shimmerSize = this.shimmerSize;
+    const stutterRatio = this.stutterRatio, shimmerRatio = this.shimmerRatio;
+    const shimmerFb = this.shimmerFb;
 
     for (let i = 0; i < count; i++) {
       for (let k = 0; k < np; k++) v[k] = (this.sm[k] as Smoother).next();
@@ -388,6 +214,86 @@ export class MagicChain implements MagicFx {
       if (!(x > -1e9 && x < 1e9)) { this.reset(); x = 0; }
       const y = softLimit(x, 0.9, 0.6);
       buffer[i] = y > 1.2 ? 1.2 : y < -1.2 ? -1.2 : y;
+    }
+  }
+
+  /**
+   * Stereo. Two of these units widen and four do not, and the four that do not
+   * say so out loud: the frequency shifter, the stutter, the freezer and the
+   * tape all process the MID and let the SIDE pass around them untouched. That
+   * is not stereo, but it is honest, and it matters — running them on a plain
+   * sum would collapse the width the vowel filter built upstream every time one
+   * of them was switched on.
+   *
+   * The vowel filter and the shimmer are genuinely two-channel: a second mix
+   * vector over the same three formant bandpasses, and a second tap off the
+   * same shimmer tank. Neither runs its DSP twice.
+   */
+  processStereo(left: Float32Array, right: Float32Array, count: number): void {
+    this.prepare();
+    const v = this.val, np = v.length;
+
+    if (!this.anyOn) {
+      for (let i = 0; i < count; i++) {
+        for (let k = 0; k < np; k++) v[k] = (this.sm[k] as Smoother).next();
+        this.freezer.process(((left[i] as number) + (right[i] as number)) * 0.5);
+      }
+      return;
+    }
+
+    const onVowel = this.onVowel, onShift = this.onShift, onStutter = this.onStutter;
+    const onShimmer = this.onShimmer, onFreeze = this.onFreeze, onTape = this.onTape;
+    const stutterSlice = this.stutterSlice, shimmerSize = this.shimmerSize;
+    const stutterRatio = this.stutterRatio, shimmerRatio = this.shimmerRatio;
+    const shimmerFb = this.shimmerFb;
+
+    for (let i = 0; i < count; i++) {
+      for (let k = 0; k < np; k++) v[k] = (this.sm[k] as Smoother).next();
+      let l = left[i] as number, r = right[i] as number;
+
+      if (onVowel) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5, mix = v[P.vowelMix] as number;
+        this.vowel.processStereo(m, v[P.vowelPos] as number, v[P.vowelSharp] as number);
+        l = blend(l, this.vowel.oL + sd, mix);
+        r = blend(r, this.vowel.oR - sd, mix);
+      }
+      if (onShift) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5;
+        const y = blend(m, this.shifter.process(m, v[P.shiftHz] as number,
+          v[P.shiftRing] as number), v[P.shiftMix] as number);
+        l = y + sd; r = y - sd;
+      }
+      if (onStutter) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5;
+        const y = blend(m, this.stutter.process(m, stutterSlice,
+          v[P.stutterChance] as number, stutterRatio), v[P.stutterMix] as number);
+        l = y + sd; r = y - sd;
+      }
+      if (onShimmer) {
+        const mix = v[P.shimmerMix] as number;
+        this.shimmer.processStereo(l, r, shimmerSize, shimmerFb, shimmerRatio,
+          v[P.shimmerDamp] as number);
+        l = blend(l, this.shimmer.oL, mix);
+        r = blend(r, this.shimmer.oR, mix);
+      }
+      const mid = (l + r) * 0.5, side = (l - r) * 0.5;
+      const frozen = this.freezer.process(mid);
+      if (onFreeze) {
+        const fm = v[P.freezeMix] as number;
+        const y = mid * (1 - 0.5 * fm) + frozen * fm;
+        l = y + side; r = y - side;
+      }
+      if (onTape) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5;
+        const y = this.tape.process(m, v[P.tapeWear] as number, v[P.tapeWow] as number,
+          v[P.tapeFlutter] as number);
+        l = y + sd; r = y - sd;
+      }
+
+      if (!(l > -1e9 && l < 1e9) || !(r > -1e9 && r < 1e9)) { this.reset(); l = 0; r = 0; }
+      const yl = softLimit(l, 0.9, 0.6), yr = softLimit(r, 0.9, 0.6);
+      left[i] = yl > 1.2 ? 1.2 : yl < -1.2 ? -1.2 : yl;
+      right[i] = yr > 1.2 ? 1.2 : yr < -1.2 ? -1.2 : yr;
     }
   }
 }

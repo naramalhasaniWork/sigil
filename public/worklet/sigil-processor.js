@@ -3936,32 +3936,8 @@ var FX_DESCRIPTOR = {
   ]
 };
 
-// src/dsp/fx.ts
+// src/dsp/fx-core.ts
 var DENORMAL6 = 1e-20;
-var P_DRIVE4 = 0;
-var P_DRIVE_TONE = 1;
-var P_CRUSH_RATE = 2;
-var P_CRUSH_BITS = 3;
-var P_CH_RATE = 4;
-var P_CH_DEPTH = 5;
-var P_CH_WIDTH = 6;
-var P_CH_MIX = 7;
-var P_DL_TIME = 8;
-var P_DL_FB = 9;
-var P_DL_TONE = 10;
-var P_DL_WIDTH = 11;
-var P_DL_MIX = 12;
-var P_RV_PREDELAY = 13;
-var P_RV_SIZE = 14;
-var P_RV_DECAY = 15;
-var P_RV_DAMP = 16;
-var P_RV_MIX = 17;
-var P_TRIM = 18;
-var N_PARAMS = FX_DESCRIPTOR.params.length;
-var SMOOTH_MS = [25, 25, 25, 25, 30, 30, 30, 30, 80, 30, 30, 60, 30, 120, 120, 30, 40, 30, 25];
-function def(i) {
-  return FX_DESCRIPTOR.params[i]?.default ?? 0;
-}
 function flush(x) {
   return x > -DENORMAL6 && x < DENORMAL6 ? 0 : x;
 }
@@ -4002,82 +3978,43 @@ var Line = class {
     this.w = 0;
   }
 };
-var CH_MID_MS = 12;
-var CH_SPREAD_MS = 7;
-var CH_DEPTH_MS = 3.5;
-var CH_DRY_CUT = 0.4;
-var CH_WET_G = 0.55;
-var Chorus = class {
-  line;
-  phase = new Float32Array(3);
-  mid;
-  spread;
-  depth;
-  constructor(sr) {
-    this.line = new Line(Math.ceil(sr * 0.05));
-    this.mid = CH_MID_MS * sr / 1e3;
-    this.spread = CH_SPREAD_MS * sr / 1e3;
-    this.depth = CH_DEPTH_MS * sr / 1e3;
-    this.reset();
-  }
-  reset() {
-    this.line.clear();
-    this.phase[0] = 0;
-    this.phase[1] = 1 / 3;
-    this.phase[2] = 2 / 3;
-  }
-  process(x, p) {
-    const r = p[P_CH_RATE], d = p[P_CH_DEPTH] * this.depth;
-    const w = p[P_CH_WIDTH], m = p[P_CH_MIX];
-    let wet = 0;
-    for (let i = 0; i < 3; i++) {
-      let ph = this.phase[i] + r * (1 + (i - 1) * 0.28 * w);
-      if (ph >= 1) ph -= 1;
-      this.phase[i] = ph;
-      wet += this.line.read(this.mid + (i - 1) * this.spread * w + d * lfo(ph));
-    }
-    this.line.write(x);
-    return x * (1 - CH_DRY_CUT * m) + wet * (m * CH_WET_G);
-  }
-};
-var DL_MAX_S = 2.05;
-var DL_FB_MAX = 0.92;
-var Delay = class {
-  a;
-  b;
-  lpA = 0;
-  lpB = 0;
-  constructor(sr) {
-    this.a = new Line(Math.ceil(sr * DL_MAX_S));
-    this.b = new Line(Math.ceil(sr * DL_MAX_S));
-  }
-  reset() {
-    this.a.clear();
-    this.b.clear();
-    this.lpA = 0;
-    this.lpB = 0;
-  }
-  process(x, p) {
-    const t = p[P_DL_TIME], f = p[P_DL_FB];
-    const c = p[P_DL_TONE], w = p[P_DL_WIDTH];
-    const ra = this.a.read(t);
-    const rb = this.b.read(t * (1 - 0.5 * w));
-    this.lpA = flush(this.lpA + c * (ra - this.lpA));
-    this.lpB = flush(this.lpB + c * (rb - this.lpB));
-    this.a.write(flush(x + f * (w * this.lpB + (1 - w) * this.lpA)));
-    this.b.write(flush(f * (w * this.lpA + (1 - w) * this.lpB)));
-    return x + p[P_DL_MIX] * 0.7 * (ra + rb);
-  }
-};
+var P_DRIVE4 = 0;
+var P_DRIVE_TONE = 1;
+var P_CRUSH_RATE = 2;
+var P_CRUSH_BITS = 3;
+var P_CH_RATE = 4;
+var P_CH_DEPTH = 5;
+var P_CH_WIDTH = 6;
+var P_CH_MIX = 7;
+var P_DL_TIME = 8;
+var P_DL_FB = 9;
+var P_DL_TONE = 10;
+var P_DL_WIDTH = 11;
+var P_DL_MIX = 12;
+var P_RV_PREDELAY = 13;
+var P_RV_SIZE = 14;
+var P_RV_DECAY = 15;
+var P_RV_DAMP = 16;
+var P_RV_MIX = 17;
+var P_TRIM = 18;
+var N_PARAMS = FX_DESCRIPTOR.params.length;
+function def(i) {
+  return FX_DESCRIPTOR.params[i]?.default ?? 0;
+}
+
+// src/dsp/fx-reverb.ts
 var FDN_N = 8;
 var AP_N = 4;
 var FDN_LEN = [1123, 1367, 1621, 1889, 2179, 2467, 2789, 3037];
 var AP_LEN = [67, 131, 229, 367];
 var AP_G = 0.55;
 var HAD = 0.3535533905932738;
+var ROOT_HALF = 0.7071067811865476;
 var RV_MAX_G = 0.94;
 var RV_MOD = 1.6;
 var RV_IN = 0.5;
+var RV_SPREAD = 1.35;
+var FDN_SIDE = [1, -1, 1, -1, 1, -1, 1, -1];
 function hadamard8(v) {
   for (let s = 1; s < FDN_N; s <<= 1) {
     for (let i = 0; i < FDN_N; i += s << 1) {
@@ -4102,7 +4039,15 @@ var Reverb = class {
   v = new Float32Array(FDN_N);
   ph = new Float32Array(FDN_N);
   inc = new Float32Array(FDN_N);
-  constructor(sr) {
+  side = new Float32Array(FDN_N);
+  /** Tank outputs, written by `tank`. Plain fields so nothing is allocated to
+   *  return two numbers from one pass of the network. */
+  sum = 0;
+  diff = 0;
+  /** Stereo results of `processStereo`. Same reasoning. */
+  oL = 0;
+  oR = 0;
+  constructor(sr, size, decayMs) {
     this.sr = sr;
     const k = sr / 48e3;
     this.pre = new Line(Math.ceil(sr * 0.2));
@@ -4115,9 +4060,10 @@ var Reverb = class {
       const l = FDN_LEN[i] * k;
       this.len[i] = l;
       this.inc[i] = (0.31 + i * 0.07) / sr;
+      this.side[i] = FDN_SIDE[i];
       this.line.push(new Line(Math.ceil(l) + 8));
     }
-    this.setDecay(def(P_RV_SIZE), def(P_RV_DECAY));
+    this.setDecay(size, decayMs);
     this.reset();
   }
   /** Per-line gain for a -60 dB tail. A step in feedback gain changes the decay
@@ -4138,8 +4084,15 @@ var Reverb = class {
     }
     this.lp.fill(0);
     this.v.fill(0);
+    this.sum = 0;
+    this.diff = 0;
+    this.oL = 0;
+    this.oR = 0;
   }
-  process(x, p) {
+  /** One pass of the whole network for one input sample. Leaves the two output
+   *  vectors in `sum` and `diff`; both entry points read them from there, so
+   *  mono and stereo run bit-identical tank arithmetic. */
+  tank(x, p) {
     const s = p[P_RV_SIZE], dp = p[P_RV_DAMP];
     let d = this.pre.read(p[P_RV_PREDELAY]);
     this.pre.write(x);
@@ -4149,13 +4102,14 @@ var Reverb = class {
       ln.write(vv);
       d = bo - AP_G * vv;
     }
-    let wet = 0;
+    let sum = 0, diff = 0;
     for (let i = 0; i < FDN_N; i++) {
       let ph = this.ph[i] + this.inc[i];
       if (ph >= 1) ph -= 1;
       this.ph[i] = ph;
       const r = this.line[i].read(this.len[i] * s + RV_MOD * lfo(ph));
-      wet += r;
+      sum += r;
+      diff += r * this.side[i];
       const l = flush(this.lp[i] + dp * (r - this.lp[i]));
       this.lp[i] = l;
       this.v[i] = l * this.gain[i];
@@ -4163,7 +4117,165 @@ var Reverb = class {
     hadamard8(this.v);
     const inj = d * RV_IN;
     for (let i = 0; i < FDN_N; i++) this.line[i].write(flush(inj + this.v[i]));
-    return x + p[P_RV_MIX] * wet * HAD;
+    this.sum = sum;
+    this.diff = diff;
+  }
+  process(x, p) {
+    this.tank(x, p);
+    return x + p[P_RV_MIX] * this.sum * HAD;
+  }
+  /**
+   * One mono tank, two decorrelated taps off it. The network is fed the mid of
+   * the two inputs — a stereo FDN would double the most expensive effect in the
+   * chain to buy a tail that is already decorrelated once you read it twice.
+   *
+   * Wet gain is chosen so each channel comes out at the level the mono chain
+   * produced — turning the reverb wide must not turn it down. Measured within
+   * 1.3 dB across the whole size / decay / damping range.
+   *
+   * A mono fold sits 3.01 dB below the mono chain, exactly, at every parameter
+   * setting: that is the arithmetic of summing two decorrelated halves, not a
+   * cancellation, and unlike a phase-trick widener it cannot get worse.
+   */
+  processStereo(l, r, p) {
+    this.tank((l + r) * 0.5, p);
+    const m = p[P_RV_MIX] * HAD * ROOT_HALF;
+    const s = this.sum, d = this.diff * RV_SPREAD;
+    this.oL = l + m * (s + d);
+    this.oR = r + m * (s - d);
+  }
+};
+
+// src/dsp/fx.ts
+var SMOOTH_MS = [25, 25, 25, 25, 30, 30, 30, 30, 80, 30, 30, 60, 30, 120, 120, 30, 40, 30, 25];
+var CH_MID_MS = 12;
+var CH_SPREAD_MS = 7;
+var CH_DEPTH_MS = 3.5;
+var CH_DRY_CUT = 0.4;
+var CH_WET_G = 0.55;
+var Chorus = class {
+  line;
+  phase = new Float32Array(3);
+  mid;
+  spread;
+  depth;
+  oL = 0;
+  oR = 0;
+  constructor(sr) {
+    this.line = new Line(Math.ceil(sr * 0.05));
+    this.mid = CH_MID_MS * sr / 1e3;
+    this.spread = CH_SPREAD_MS * sr / 1e3;
+    this.depth = CH_DEPTH_MS * sr / 1e3;
+    this.reset();
+  }
+  reset() {
+    this.line.clear();
+    this.phase[0] = 0;
+    this.phase[1] = 1 / 3;
+    this.phase[2] = 2 / 3;
+    this.oL = 0;
+    this.oR = 0;
+  }
+  process(x, p) {
+    const r = p[P_CH_RATE], d = p[P_CH_DEPTH] * this.depth;
+    const w = p[P_CH_WIDTH], m = p[P_CH_MIX];
+    let wet = 0;
+    for (let i = 0; i < 3; i++) {
+      let ph = this.phase[i] + r * (1 + (i - 1) * 0.28 * w);
+      if (ph >= 1) ph -= 1;
+      this.phase[i] = ph;
+      wet += this.line.read(this.mid + (i - 1) * this.spread * w + d * lfo(ph));
+    }
+    this.line.write(x);
+    return x * (1 - CH_DRY_CUT * m) + wet * (m * CH_WET_G);
+  }
+  /**
+   * Same three taps, read twice: the right channel's modulation runs half a
+   * cycle out of phase with the left's, so the two sides pull away from each
+   * other in opposite directions instead of wobbling together. Width fades the
+   * antiphase in, and at zero the two reads land on identical delays — the
+   * channels are then bit-identical, not merely close.
+   *
+   * No cancellation risk: both sides are delayed copies of the same line with a
+   * positive sign, so the mono fold is a comb, never a subtraction.
+   */
+  processStereo(l, r, p) {
+    const rate = p[P_CH_RATE], d = p[P_CH_DEPTH] * this.depth;
+    const w = p[P_CH_WIDTH], m = p[P_CH_MIX];
+    let wetL = 0, wetR = 0;
+    for (let i = 0; i < 3; i++) {
+      let ph = this.phase[i] + rate * (1 + (i - 1) * 0.28 * w);
+      if (ph >= 1) ph -= 1;
+      this.phase[i] = ph;
+      const base = this.mid + (i - 1) * this.spread * w;
+      const mod = d * lfo(ph);
+      const anti = d * lfo(ph >= 0.5 ? ph - 0.5 : ph + 0.5);
+      wetL += this.line.read(base + mod);
+      wetR += this.line.read(base + mod + (anti - mod) * w);
+    }
+    this.line.write((l + r) * 0.5);
+    const dry = 1 - CH_DRY_CUT * m, g = m * CH_WET_G;
+    this.oL = l * dry + wetL * g;
+    this.oR = r * dry + wetR * g;
+  }
+};
+var DL_MAX_S = 2.05;
+var DL_FB_MAX = 0.92;
+var DL_WET_G = 0.7;
+var Delay = class {
+  a;
+  b;
+  lpA = 0;
+  lpB = 0;
+  oL = 0;
+  oR = 0;
+  constructor(sr) {
+    this.a = new Line(Math.ceil(sr * DL_MAX_S));
+    this.b = new Line(Math.ceil(sr * DL_MAX_S));
+  }
+  reset() {
+    this.a.clear();
+    this.b.clear();
+    this.lpA = 0;
+    this.lpB = 0;
+    this.oL = 0;
+    this.oR = 0;
+  }
+  process(x, p) {
+    const t = p[P_DL_TIME], f = p[P_DL_FB];
+    const c = p[P_DL_TONE], w = p[P_DL_WIDTH];
+    const ra = this.a.read(t);
+    const rb = this.b.read(t * (1 - 0.5 * w));
+    this.lpA = flush(this.lpA + c * (ra - this.lpA));
+    this.lpB = flush(this.lpB + c * (rb - this.lpB));
+    this.a.write(flush(x + f * (w * this.lpB + (1 - w) * this.lpA)));
+    this.b.write(flush(f * (w * this.lpA + (1 - w) * this.lpB)));
+    return x + p[P_DL_MIX] * DL_WET_G * (ra + rb);
+  }
+  /**
+   * Real ping-pong. Both lines run at the same time now — the mono version's
+   * time offset only existed because bouncing in space is invisible in one
+   * channel. Line A goes to the left, line B to the right, and width steers two
+   * things at once: how much dry lands in B, and how much of each line's
+   * feedback comes from the other. At width 0 the two lines are fed identically
+   * and stay sample-identical, so the delay collapses to plain mono; at 1, A is
+   * the only line taking input and hands every repeat across to B and back.
+   *
+   * Stable at every setting: the feedback matrix f·[[1−w, w], [w, 1−w]] has
+   * eigenvalues f and f(1−2w), so its spectral radius is f regardless of width.
+   */
+  processStereo(l, r, p) {
+    const t = p[P_DL_TIME], f = p[P_DL_FB];
+    const c = p[P_DL_TONE], w = p[P_DL_WIDTH];
+    const ra = this.a.read(t), rb = this.b.read(t);
+    this.lpA = flush(this.lpA + c * (ra - this.lpA));
+    this.lpB = flush(this.lpB + c * (rb - this.lpB));
+    const x = (l + r) * 0.5;
+    this.a.write(flush(x + f * (w * this.lpB + (1 - w) * this.lpA)));
+    this.b.write(flush(x * (1 - w) + f * (w * this.lpA + (1 - w) * this.lpB)));
+    const g = p[P_DL_MIX] * DL_WET_G;
+    this.oL = l + g * ra;
+    this.oR = r + g * rb;
   }
 };
 var DRIVE_REF = 0.35;
@@ -4176,6 +4288,9 @@ var FxChain = class {
   wasChorus = false;
   wasDelay = false;
   wasReverb = false;
+  onChorus = false;
+  onDelay = false;
+  onReverb = false;
   sm = [];
   target = new Float32Array(N_PARAMS);
   /** Smoothed, in DSP units — the only path into the DSP, so an un-smoothed
@@ -4196,7 +4311,7 @@ var FxChain = class {
     for (let i = 0; i < N_PARAMS; i++) this.sm.push(new Smoother(sampleRate2, SMOOTH_MS[i] ?? 25));
     this.chorus = new Chorus(sampleRate2);
     this.delay = new Delay(sampleRate2);
-    this.reverb = new Reverb(sampleRate2);
+    this.reverb = new Reverb(sampleRate2, def(P_RV_SIZE), def(P_RV_DECAY));
     this.tiltC = onePole(TILT_HZ, sampleRate2);
     for (let i = 0; i < N_PARAMS; i++) this.setParam(i, def(i));
     this.reset();
@@ -4249,42 +4364,90 @@ var FxChain = class {
    * unit, because its delay lines still hold audio from before the bypass and
    * fading that in would burst stale sound.
    */
-  process(buffer, count) {
+  gate() {
     const v = this.v, sm = this.sm;
     for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
-    const onChorus = v[P_CH_MIX] > SILENT;
-    const onDelay = v[P_DL_MIX] > SILENT;
-    const onReverb = v[P_RV_MIX] > SILENT;
-    if (onChorus && !this.wasChorus) this.chorus.reset();
-    if (onDelay && !this.wasDelay) this.delay.reset();
-    if (onReverb && !this.wasReverb) this.reverb.reset();
-    this.wasChorus = onChorus;
-    this.wasDelay = onDelay;
-    this.wasReverb = onReverb;
+    this.onChorus = v[P_CH_MIX] > SILENT;
+    this.onDelay = v[P_DL_MIX] > SILENT;
+    this.onReverb = v[P_RV_MIX] > SILENT;
+    if (this.onChorus && !this.wasChorus) this.chorus.reset();
+    if (this.onDelay && !this.wasDelay) this.delay.reset();
+    if (this.onReverb && !this.wasReverb) this.reverb.reset();
+    this.wasChorus = this.onChorus;
+    this.wasDelay = this.onDelay;
+    this.wasReverb = this.onReverb;
+  }
+  /** Drive and bitcrush: memoryless-plus-tilt, and inherently one-channel. In
+   *  stereo they run on the mid and the side passes them by, which is exactly
+   *  what they do to a mono bus and costs nothing extra. */
+  front(dry, v) {
+    let x = dry;
+    const amt = v[P_DRIVE4];
+    this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
+    if (amt > 0) {
+      const g = 1 + amt * DRIVE_MAX_G;
+      const shaped = x + v[P_DRIVE_TONE] * (x - this.tilt);
+      const w = sat(shaped * g) * DRIVE_REF / sat(DRIVE_REF * g);
+      x = dry + (w - dry) * (amt * (2 - amt));
+    }
+    this.acc += v[P_CRUSH_RATE];
+    if (this.acc >= 1) {
+      this.acc -= 1;
+      this.held = x;
+    }
+    const half = v[P_CRUSH_BITS];
+    return Math.floor(this.held * half + 0.5) / half;
+  }
+  process(buffer, count) {
+    const v = this.v, sm = this.sm;
+    this.gate();
+    const onChorus = this.onChorus, onDelay = this.onDelay, onReverb = this.onReverb;
     for (let n = 0; n < count; n++) {
       for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
-      const dry = buffer[n];
-      let x = dry;
-      const amt = v[P_DRIVE4];
-      this.tilt = flush(this.tilt + this.tiltC * (x - this.tilt));
-      if (amt > 0) {
-        const g = 1 + amt * DRIVE_MAX_G;
-        const shaped = x + v[P_DRIVE_TONE] * (x - this.tilt);
-        const w = sat(shaped * g) * DRIVE_REF / sat(DRIVE_REF * g);
-        x = dry + (w - dry) * (amt * (2 - amt));
-      }
-      this.acc += v[P_CRUSH_RATE];
-      if (this.acc >= 1) {
-        this.acc -= 1;
-        this.held = x;
-      }
-      const half = v[P_CRUSH_BITS];
-      x = Math.floor(this.held * half + 0.5) / half;
+      let x = this.front(buffer[n], v);
       if (onChorus) x = this.chorus.process(x, v);
       if (onDelay) x = this.delay.process(x, v);
       if (onReverb) x = this.reverb.process(x, v);
       x = sat(x * v[P_TRIM] / LIMIT) * LIMIT;
       buffer[n] = x === x ? x : 0;
+    }
+  }
+  /**
+   * The stereo entry point. Width lives here, not in the oscillators: six
+   * engines rendering two channels would double the synth's cost to buy
+   * something the effects give away nearly free.
+   */
+  processStereo(left, right, count) {
+    const v = this.v, sm = this.sm;
+    this.gate();
+    const onChorus = this.onChorus, onDelay = this.onDelay, onReverb = this.onReverb;
+    const ch = this.chorus, dl = this.delay, rv = this.reverb;
+    for (let n = 0; n < count; n++) {
+      for (let i = 0; i < N_PARAMS; i++) v[i] = sm[i].next();
+      const li = left[n], ri = right[n];
+      const mid = this.front((li + ri) * 0.5, v);
+      const side = (li - ri) * 0.5;
+      let l = mid + side, r = mid - side;
+      if (onChorus) {
+        ch.processStereo(l, r, v);
+        l = ch.oL;
+        r = ch.oR;
+      }
+      if (onDelay) {
+        dl.processStereo(l, r, v);
+        l = dl.oL;
+        r = dl.oR;
+      }
+      if (onReverb) {
+        rv.processStereo(l, r, v);
+        l = rv.oL;
+        r = rv.oR;
+      }
+      const trim = v[P_TRIM] / LIMIT;
+      l = sat(l * trim) * LIMIT;
+      r = sat(r * trim) * LIMIT;
+      left[n] = l === l ? l : 0;
+      right[n] = r === r ? r : 0;
     }
   }
 };
@@ -4822,7 +4985,7 @@ var FreqShifter = class {
   }
 };
 
-// src/dsp/fx-magic.ts
+// src/dsp/fx-magic-units.ts
 var Freezer = class {
   ring;
   loop;
@@ -4876,12 +5039,15 @@ var Freezer = class {
     return y * g;
   }
 };
+var SHIM_TAP_R = 0.79;
 var Shimmer = class {
   line;
   shifter;
   d1;
   d2;
   z = 0;
+  oL = 0;
+  oR = 0;
   constructor(sr) {
     this.line = new DelayLine(Math.round(sr * 0.55));
     this.shifter = new PitchShifter(sr, 60);
@@ -4894,8 +5060,13 @@ var Shimmer = class {
     this.d1.reset();
     this.d2.reset();
     this.z = 0;
+    this.oL = 0;
+    this.oR = 0;
   }
-  process(x, delay, fb, ratio, damp) {
+  /** Advances the tank by one sample and returns the left tail. The tank is the
+   *  expensive part — a pitch shifter and two diffusers — so both entry points
+   *  share it and stereo only pays for one extra interpolated read. */
+  tank(x, delay, fb, ratio, damp) {
     const tail = this.line.read(delay);
     this.z = flush2(this.z + (1 - damp * 0.92) * (tail - this.z));
     let w = this.d2.process(this.d1.process(x + saturate6(this.shifter.process(this.z, ratio) * fb)));
@@ -4904,11 +5075,31 @@ var Shimmer = class {
     this.line.write(flush2(w));
     return tail;
   }
+  process(x, delay, fb, ratio, damp) {
+    return this.tank(x, delay, fb, ratio, damp);
+  }
+  /**
+   * Two taps off one tank at unrelated distances. The rising octaves reach the
+   * two ears at genuinely different points in their climb, which is the whole
+   * illusion, and it costs one delay-line read rather than a second shifter.
+   * Feedback stays on the left tap so the tank behaves exactly as it does in
+   * mono; only the extra output tap is new.
+   */
+  processStereo(l, r, delay, fb, ratio, damp) {
+    this.oR = this.line.read(delay * SHIM_TAP_R);
+    this.oL = this.tank((l + r) * 0.5, delay, fb, ratio, damp);
+  }
 };
+var VOWEL_SPREAD = 0.75;
 var VowelFilter = class {
   f = [];
   lastPos = -1;
   lastSharp = -1;
+  b0 = 0;
+  b1 = 0;
+  b2 = 0;
+  oL = 0;
+  oR = 0;
   constructor(sr) {
     for (let k = 0; k < 3; k++) {
       const s = new StateVariableFilter(sr);
@@ -4920,8 +5111,13 @@ var VowelFilter = class {
     for (let k = 0; k < 3; k++) this.f[k].reset();
     this.lastPos = -1;
     this.lastSharp = -1;
+    this.b0 = 0;
+    this.b1 = 0;
+    this.b2 = 0;
+    this.oL = 0;
+    this.oR = 0;
   }
-  process(x, pos, sharp) {
+  bands(x, pos, sharp) {
     if (Math.abs(pos - this.lastPos) > 2e-3 || Math.abs(sharp - this.lastSharp) > 5e-3) {
       this.lastPos = pos;
       this.lastSharp = sharp;
@@ -4938,10 +5134,26 @@ var VowelFilter = class {
         flt.setResonance(0.55 + 0.42 * sharp);
       }
     }
-    const b0 = this.f[0].process(x);
-    const b1 = this.f[1].process(x);
-    const b2 = this.f[2].process(x);
-    return (b0 + b1 * 0.55 + b2 * 0.3) * 0.45;
+    this.b0 = this.f[0].process(x);
+    this.b1 = this.f[1].process(x);
+    this.b2 = this.f[2].process(x);
+  }
+  process(x, pos, sharp) {
+    this.bands(x, pos, sharp);
+    return (this.b0 + this.b1 * 0.55 + this.b2 * 0.3) * 0.45;
+  }
+  /**
+   * A second mix vector over the same three bandpasses. The low formant sits to
+   * one side and the high formant to the other — a mouth with width — and
+   * because the two weightings are mirror images about the mono one, (L+R)/2
+   * reproduces `process` exactly. Nothing can cancel in a mono fold, because
+   * every term is added on both sides, only in different proportions.
+   */
+  processStereo(x, pos, sharp) {
+    this.bands(x, pos, sharp);
+    const lo = this.b0, mid = this.b1 * 0.55, hi = this.b2 * 0.3;
+    this.oL = (lo * (1 + VOWEL_SPREAD) + mid + hi * (1 - VOWEL_SPREAD)) * 0.45;
+    this.oR = (lo * (1 - VOWEL_SPREAD) + mid + hi * (1 + VOWEL_SPREAD)) * 0.45;
   }
 };
 var Stutter = class {
@@ -5031,6 +5243,8 @@ var Stutter = class {
     return y;
   }
 };
+
+// src/dsp/fx-magic.ts
 var SILENT2 = 1e-4;
 var MagicChain = class {
   /** Smoother targets, so gating opens a unit the instant a mix starts rising
@@ -5041,6 +5255,18 @@ var MagicChain = class {
   wasStutter = false;
   wasShimmer = false;
   wasTape = false;
+  onVowel = false;
+  onShift = false;
+  onStutter = false;
+  onShimmer = false;
+  onFreeze = false;
+  onTape = false;
+  anyOn = false;
+  stutterRatio = 1;
+  shimmerRatio = 1;
+  stutterSlice = 0;
+  shimmerSize = 0;
+  shimmerFb = 0;
   sr;
   sm = [];
   val;
@@ -5117,8 +5343,15 @@ var MagicChain = class {
    * Re-enabling a unit resets it. Its delay lines hold audio from before the
    * bypass, and fading that back in would burst stale sound — nothing was
    * audible at mix zero, so there is no continuity worth preserving.
+   *
+   * Gate on the TARGET as well as the current value. Hoisting the smoother
+   * stepping out of the sample loop made parameter smoothing 128x slower — a
+   * knob move would have taken about a third of a second to arrive — so the
+   * per-sample stepping stays and the decision looks at where each mix is
+   * heading. A unit is live while it is on, still ramping up, or ramping down
+   * and not yet silent.
    */
-  process(buffer, count) {
+  prepare() {
     if (this.wantCapture) {
       this.freezer.capture(this.freezeLenMs / 1e3 * this.sr);
       this.wantCapture = false;
@@ -5127,39 +5360,47 @@ var MagicChain = class {
       this.freezer.release();
       this.wantRelease = false;
     }
-    const v = this.val;
-    const np = v.length;
-    const sr = this.sr;
-    const t = this.tgt;
+    const v = this.val, t = this.tgt;
     const live = (idx) => v[idx] > SILENT2 || t[idx] > SILENT2;
-    const onVowel = live(MAGIC_PARAM.vowelMix);
-    const onShift = live(MAGIC_PARAM.shiftMix);
-    const onStutter = live(MAGIC_PARAM.stutterMix);
-    const onShimmer = live(MAGIC_PARAM.shimmerMix);
-    const onFreeze = live(MAGIC_PARAM.freezeMix);
-    const onTape = live(MAGIC_PARAM.tapeWear) || live(MAGIC_PARAM.tapeWow) || live(MAGIC_PARAM.tapeFlutter);
-    if (onVowel && !this.wasVowel) this.vowel.reset();
-    if (onShift && !this.wasShift) this.shifter.reset();
-    if (onStutter && !this.wasStutter) this.stutter.reset();
-    if (onShimmer && !this.wasShimmer) this.shimmer.reset();
-    if (onTape && !this.wasTape) this.tape.reset();
-    this.wasVowel = onVowel;
-    this.wasShift = onShift;
-    this.wasStutter = onStutter;
-    this.wasShimmer = onShimmer;
-    this.wasTape = onTape;
-    if (!onVowel && !onShift && !onStutter && !onShimmer && !onFreeze && !onTape) {
+    this.onVowel = live(MAGIC_PARAM.vowelMix);
+    this.onShift = live(MAGIC_PARAM.shiftMix);
+    this.onStutter = live(MAGIC_PARAM.stutterMix);
+    this.onShimmer = live(MAGIC_PARAM.shimmerMix);
+    this.onFreeze = live(MAGIC_PARAM.freezeMix);
+    this.onTape = live(MAGIC_PARAM.tapeWear) || live(MAGIC_PARAM.tapeWow) || live(MAGIC_PARAM.tapeFlutter);
+    if (this.onVowel && !this.wasVowel) this.vowel.reset();
+    if (this.onShift && !this.wasShift) this.shifter.reset();
+    if (this.onStutter && !this.wasStutter) this.stutter.reset();
+    if (this.onShimmer && !this.wasShimmer) this.shimmer.reset();
+    if (this.onTape && !this.wasTape) this.tape.reset();
+    this.wasVowel = this.onVowel;
+    this.wasShift = this.onShift;
+    this.wasStutter = this.onStutter;
+    this.wasShimmer = this.onShimmer;
+    this.wasTape = this.onTape;
+    this.anyOn = this.onVowel || this.onShift || this.onStutter || this.onShimmer || this.onFreeze || this.onTape;
+    if (!this.anyOn) return;
+    this.stutterRatio = 2 ** (t[MAGIC_PARAM.stutterPitch] / 12);
+    this.shimmerRatio = 2 ** (t[MAGIC_PARAM.shimmerPitch] / 12);
+    this.stutterSlice = t[MAGIC_PARAM.stutterSlice] / 1e3 * this.sr;
+    this.shimmerSize = t[MAGIC_PARAM.shimmerSize] / 1e3 * this.sr;
+    this.shimmerFb = t[MAGIC_PARAM.shimmerFeedback] * 0.85;
+  }
+  process(buffer, count) {
+    this.prepare();
+    const v = this.val, np = v.length;
+    if (!this.anyOn) {
       for (let i = 0; i < count; i++) {
         for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
         this.freezer.process(buffer[i]);
       }
       return;
     }
-    const stutterRatio = 2 ** (t[MAGIC_PARAM.stutterPitch] / 12);
-    const shimmerRatio = 2 ** (t[MAGIC_PARAM.shimmerPitch] / 12);
-    const stutterSlice = t[MAGIC_PARAM.stutterSlice] / 1e3 * sr;
-    const shimmerSize = t[MAGIC_PARAM.shimmerSize] / 1e3 * sr;
-    const shimmerFb = t[MAGIC_PARAM.shimmerFeedback] * 0.85;
+    const onVowel = this.onVowel, onShift = this.onShift, onStutter = this.onStutter;
+    const onShimmer = this.onShimmer, onFreeze = this.onFreeze, onTape = this.onTape;
+    const stutterSlice = this.stutterSlice, shimmerSize = this.shimmerSize;
+    const stutterRatio = this.stutterRatio, shimmerRatio = this.shimmerRatio;
+    const shimmerFb = this.shimmerFb;
     for (let i = 0; i < count; i++) {
       for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
       let x = buffer[i];
@@ -5213,6 +5454,105 @@ var MagicChain = class {
       }
       const y = softLimit2(x, 0.9, 0.6);
       buffer[i] = y > 1.2 ? 1.2 : y < -1.2 ? -1.2 : y;
+    }
+  }
+  /**
+   * Stereo. Two of these units widen and four do not, and the four that do not
+   * say so out loud: the frequency shifter, the stutter, the freezer and the
+   * tape all process the MID and let the SIDE pass around them untouched. That
+   * is not stereo, but it is honest, and it matters — running them on a plain
+   * sum would collapse the width the vowel filter built upstream every time one
+   * of them was switched on.
+   *
+   * The vowel filter and the shimmer are genuinely two-channel: a second mix
+   * vector over the same three formant bandpasses, and a second tap off the
+   * same shimmer tank. Neither runs its DSP twice.
+   */
+  processStereo(left, right, count) {
+    this.prepare();
+    const v = this.val, np = v.length;
+    if (!this.anyOn) {
+      for (let i = 0; i < count; i++) {
+        for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
+        this.freezer.process((left[i] + right[i]) * 0.5);
+      }
+      return;
+    }
+    const onVowel = this.onVowel, onShift = this.onShift, onStutter = this.onStutter;
+    const onShimmer = this.onShimmer, onFreeze = this.onFreeze, onTape = this.onTape;
+    const stutterSlice = this.stutterSlice, shimmerSize = this.shimmerSize;
+    const stutterRatio = this.stutterRatio, shimmerRatio = this.shimmerRatio;
+    const shimmerFb = this.shimmerFb;
+    for (let i = 0; i < count; i++) {
+      for (let k = 0; k < np; k++) v[k] = this.sm[k].next();
+      let l = left[i], r = right[i];
+      if (onVowel) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5, mix = v[MAGIC_PARAM.vowelMix];
+        this.vowel.processStereo(m, v[MAGIC_PARAM.vowelPos], v[MAGIC_PARAM.vowelSharp]);
+        l = blend(l, this.vowel.oL + sd, mix);
+        r = blend(r, this.vowel.oR - sd, mix);
+      }
+      if (onShift) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5;
+        const y = blend(m, this.shifter.process(
+          m,
+          v[MAGIC_PARAM.shiftHz],
+          v[MAGIC_PARAM.shiftRing]
+        ), v[MAGIC_PARAM.shiftMix]);
+        l = y + sd;
+        r = y - sd;
+      }
+      if (onStutter) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5;
+        const y = blend(m, this.stutter.process(
+          m,
+          stutterSlice,
+          v[MAGIC_PARAM.stutterChance],
+          stutterRatio
+        ), v[MAGIC_PARAM.stutterMix]);
+        l = y + sd;
+        r = y - sd;
+      }
+      if (onShimmer) {
+        const mix = v[MAGIC_PARAM.shimmerMix];
+        this.shimmer.processStereo(
+          l,
+          r,
+          shimmerSize,
+          shimmerFb,
+          shimmerRatio,
+          v[MAGIC_PARAM.shimmerDamp]
+        );
+        l = blend(l, this.shimmer.oL, mix);
+        r = blend(r, this.shimmer.oR, mix);
+      }
+      const mid = (l + r) * 0.5, side = (l - r) * 0.5;
+      const frozen = this.freezer.process(mid);
+      if (onFreeze) {
+        const fm = v[MAGIC_PARAM.freezeMix];
+        const y = mid * (1 - 0.5 * fm) + frozen * fm;
+        l = y + side;
+        r = y - side;
+      }
+      if (onTape) {
+        const m = (l + r) * 0.5, sd = (l - r) * 0.5;
+        const y = this.tape.process(
+          m,
+          v[MAGIC_PARAM.tapeWear],
+          v[MAGIC_PARAM.tapeWow],
+          v[MAGIC_PARAM.tapeFlutter]
+        );
+        l = y + sd;
+        r = y - sd;
+      }
+      if (!(l > -1e9 && l < 1e9) || !(r > -1e9 && r < 1e9)) {
+        this.reset();
+        l = 0;
+        r = 0;
+      }
+      const yl = softLimit2(l, 0.9, 0.6), yr = softLimit2(r, 0.9, 0.6);
+      left[i] = yl > 1.2 ? 1.2 : yl < -1.2 ? -1.2 : yl;
+      right[i] = yr > 1.2 ? 1.2 : yr < -1.2 ? -1.2 : yr;
     }
   }
 };
@@ -5336,10 +5676,17 @@ var SigilProcessor = class extends AudioWorkletProcessor {
     if (!output) return true;
     const left = output[0];
     if (!left) return true;
+    const right = output[1];
     left.fill(0);
     this.active.render(left, left.length);
-    this.fx.process(left, left.length);
-    this.magic.process(left, left.length);
+    if (right) {
+      right.set(left);
+      this.fx.processStereo(left, right, left.length);
+      this.magic.processStereo(left, right, left.length);
+    } else {
+      this.fx.process(left, left.length);
+      this.magic.process(left, left.length);
+    }
     if (this.releaseAtSample >= 0 && this.bounceNotes.length > 0) {
       this.samplesRendered += left.length;
       if (this.samplesRendered >= this.releaseAtSample) {
@@ -5350,13 +5697,19 @@ var SigilProcessor = class extends AudioWorkletProcessor {
     if (this.capturing) {
       const room = this.captureBuf.length - this.captureLen;
       const n = left.length < room ? left.length : room;
-      for (let i = 0; i < n; i++) {
-        this.captureBuf[this.captureLen + i] = left[i];
+      if (right) {
+        for (let i = 0; i < n; i++) {
+          this.captureBuf[this.captureLen + i] = (left[i] + right[i]) * 0.5;
+        }
+      } else {
+        for (let i = 0; i < n; i++) {
+          this.captureBuf[this.captureLen + i] = left[i];
+        }
       }
       this.captureLen += n;
       if (this.captureLen >= this.captureBuf.length) this.finishCapture(true);
     }
-    for (let ch = 1; ch < output.length; ch++) {
+    for (let ch = right ? 2 : 1; ch < output.length; ch++) {
       output[ch]?.set(left);
     }
     return true;
