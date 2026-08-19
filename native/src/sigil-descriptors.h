@@ -96,6 +96,7 @@ inline constexpr ParamDesc kParams_fm[] = {
     {"mod-decay", "Mod Decay", "Modulator Envelope", "ms", 1, 8000, 400, "exp", 0},
     {"mod-sustain", "Mod Sustain", "Modulator Envelope", "pct", 0, 1, 0.3, "linear", 0},
     {"mod-release", "Mod Release", "Modulator Envelope", "ms", 1, 8000, 300, "exp", 0},
+    {"vel-index", "Touch", "Tone", "pct", 0, 1, 0, "linear", 0},
 };
 inline constexpr ParamDesc kParams_physical[] = {
     {"material", "Material", "Body", "pct", 0, 1, 0.62, "linear", 0},
@@ -183,6 +184,7 @@ inline constexpr ParamDesc kParams_fx[] = {
     {"reverb-damping", "Damping", "Reverb", "pct", 0, 1, 0.5, "linear", 0},
     {"reverb-mix", "Reverb Mix", "Reverb", "pct", 0, 1, 0, "linear", 0},
     {"output-trim", "Output", "Output", "db", -24, 12, 0, "linear", 0},
+    {"output-glue", "Glue", "Output", "pct", 0, 1, 0, "linear", 0},
 };
 inline constexpr ParamDesc kParams_magic[] = {
     {"freeze-capture", "Capture", "Freeze", "none", 0, 1, 0, "stepped", 2},
@@ -213,7 +215,7 @@ inline constexpr ParamDesc kParams_magic[] = {
  *  engine-select parameter is an index into this array. */
 inline constexpr EngineDesc kEngines[] = {
     {"analog", "Analog", kParams_analog, 33},
-    {"fm", "FM", kParams_fm, 26},
+    {"fm", "FM", kParams_fm, 27},
     {"physical", "Physical", kParams_physical, 12},
     {"granular", "Granular", kParams_granular, 11},
     {"sampler", "Sampler", kParams_sampler, 21},
@@ -221,7 +223,7 @@ inline constexpr EngineDesc kEngines[] = {
 };
 constexpr int kEngineCount = 6;
 
-inline constexpr EngineDesc kFxDesc = {"fx", "Effects", kParams_fx, 19};
+inline constexpr EngineDesc kFxDesc = {"fx", "Effects", kParams_fx, 20};
 inline constexpr EngineDesc kMagicDesc = {"fx-magic", "Magic", kParams_magic, 22};
 
 }  // namespace desc

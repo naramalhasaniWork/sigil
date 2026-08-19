@@ -51,6 +51,31 @@ export function limitOut(x: number): number {
   return x < 0 ? -bent : bent;
 }
 
+/**
+ * The optional bus-saturation curve, driven by the Glue parameter.
+ *
+ * This IS the stage that used to be soldered across the output as
+ * `sat(x / 1.5) * 1.5`, and removing it was half right. As a permanent stage it
+ * was indefensible: -48 dB THD+N at -20 dBFS on a chain with every control at
+ * zero, which is a veil nobody asked for. But what it was DOING is a gentle bus
+ * saturator - odd harmonics that grow with level, peaks compressed harder the
+ * harder you play - and that is a thing a musician reaches for on purpose.
+ *
+ * So it comes back as a blend rather than a replacement. `amount` 0 returns x
+ * itself; `amount` 1 is the old curve exactly, so the character that was lost is
+ * genuinely recoverable rather than approximated. Everything in between is a
+ * straight crossfade, which keeps the harmonic content proportional to the knob
+ * instead of arriving all at once.
+ *
+ * Monotone at every amount: sat' >= 0 across its clamped domain and reaches
+ * exactly 0 at the clamp, so blending it with the identity can never fold the
+ * transfer curve back on itself.
+ */
+export function glueOut(x: number, amount: number): number {
+  const shaped = sat(x / LIMIT_CEIL) * LIMIT_CEIL;
+  return x + (shaped - x) * amount;
+}
+
 /** Parabolic sine over phase 0..1 — no transcendentals in the sample loop. */
 export function lfo(p: number): number {
   const t = p * 2 - 1;
@@ -88,7 +113,7 @@ export const P_DRIVE = 0, P_DRIVE_TONE = 1, P_CRUSH_RATE = 2, P_CRUSH_BITS = 3;
 export const P_CH_RATE = 4, P_CH_DEPTH = 5, P_CH_WIDTH = 6, P_CH_MIX = 7;
 export const P_DL_TIME = 8, P_DL_FB = 9, P_DL_TONE = 10, P_DL_WIDTH = 11, P_DL_MIX = 12;
 export const P_RV_PREDELAY = 13, P_RV_SIZE = 14, P_RV_DECAY = 15;
-export const P_RV_DAMP = 16, P_RV_MIX = 17, P_TRIM = 18;
+export const P_RV_DAMP = 16, P_RV_MIX = 17, P_TRIM = 18, P_GLUE = 19;
 
 export const N_PARAMS = FX_DESCRIPTOR.params.length;
 

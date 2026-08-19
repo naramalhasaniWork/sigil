@@ -140,6 +140,17 @@ inline double limitOut(double x) {
   return x < 0.0 ? -bent : bent;
 }
 
+/**
+ * The optional bus-saturation curve behind the Glue parameter (fx-core.ts
+ * glueOut). This is the stage that used to be soldered across the output as
+ * `sat(x / 1.5) * 1.5`: at amount 0 it returns x itself, at amount 1 it is that
+ * old curve exactly, and in between it is a straight crossfade.
+ */
+inline double glueOut(double x, double amount) {
+  const double shaped = sat(x / kLimitCeil) * kLimitCeil;
+  return x + (shaped - x) * amount;
+}
+
 /** Parabolic sine over phase 0..1 - no transcendentals in the sample loop. */
 inline double lfo(double p) {
   const double t = p * 2.0 - 1.0;

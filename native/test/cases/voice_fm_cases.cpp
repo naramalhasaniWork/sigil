@@ -26,6 +26,7 @@ const char* const kIds[sigil::fm::kNumParams] = {
     "index", "key-scale", "feedback", "spread", "balance",
     "amp-attack", "amp-decay", "amp-sustain", "amp-release",
     "mod-attack", "mod-decay", "mod-sustain", "mod-release",
+    "vel-index",
 };
 
 bool run_voice_fm(const Case& c, std::vector<float>& out) {

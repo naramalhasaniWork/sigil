@@ -36,10 +36,12 @@ constexpr int kPSpread = 16;
 constexpr int kPBalance = 17;
 constexpr int kPAmpA = 18;
 constexpr int kPModA = 22;
+constexpr int kPEnvLast = 25;
+constexpr int kPVelIndex = 26;
 
 constexpr int kNumOps = 4;
 constexpr int kMaxAlgo = 4;
-constexpr int kNumParams = 26;
+constexpr int kNumParams = 27;
 
 /** Bit k set = operator k+1 is a carrier, per algorithm. (Uint8Array) */
 constexpr std::uint8_t kCarrierMask[5] = {0x1, 0x1, 0x5, 0xF, 0x3};
@@ -62,6 +64,7 @@ constexpr float kDefaults[kNumParams] = {
     0.45f,                    // balance
     3.0f, 700.0f, 0.55f, 400.0f,   // carrier envelope A/D/S/R
     1.0f, 400.0f, 0.3f, 300.0f,    // modulator envelope A/D/S/R
+    0.0f,                     // vel-index (Touch) - appended, stays last
 };
 
 /** Hard-bounded soft clipper; cannot exceed 1, which is what keeps the
@@ -102,7 +105,7 @@ public:
     if (index < 0 || index >= fm::kNumParams) return;
     params_[index] = static_cast<float>(value);
     if (index == fm::kPAlgo) applyRouting();
-    else if (index >= fm::kPAmpA) applyEnvelopes();
+    else if (index >= fm::kPAmpA && index <= fm::kPEnvLast) applyEnvelopes();
   }
 
   void noteOn(double freq, double velocity, int voiceIndex) {
@@ -157,7 +160,7 @@ public:
     Smoother* ls = levelSmooth_;
     Smoother* gs = gainSmooth_;
     const int algo = algo_;
-    const double ks = keyScale_;
+    const double ks = keyScale_ * velIndexScale_;
     const double amp = velocity_ * 0.32;
 
     indexSmooth_.setTarget(static_cast<double>(params_[fm::kPIndex]));
@@ -269,6 +272,13 @@ private:
     const double ks = std::pow(kRefHz / baseFreq_, static_cast<double>(params_[fm::kPKeyScale]));
     keyScale_ = ks < 0.15 ? 0.15 : (ks > 2.5 ? 2.5 : ks);
 
+    // Velocity into brightness (Touch). Scales the patch's Index DOWN as
+    // velocity falls, squared so the opening is weighted into the top of the
+    // range. At amount 0 this is exactly 1.0 and the old signal path is
+    // bit-identical - the multiply in render() is by exactly one.
+    const double vel = velocity_ < 0.0 ? 0.0 : (velocity_ > 1.0 ? 1.0 : velocity_);
+    velIndexScale_ = 1.0 - static_cast<double>(params_[fm::kPVelIndex]) * (1.0 - vel * vel);
+
     const int mask = carrierMask_;
     int n = 0;
     for (int k = 0; k < fm::kNumOps; ++k) if ((mask & (1 << k)) != 0) n++;
@@ -315,6 +325,7 @@ private:
   int algo_ = 0;
   int carrierMask_ = 1;
   double keyScale_ = 1.0;
+  double velIndexScale_ = 1.0;
 
   double ph0_ = 0.0, ph1_ = 0.0, ph2_ = 0.0, ph3_ = 0.0;
   double fbZ1_ = 0.0, fbZ2_ = 0.0;

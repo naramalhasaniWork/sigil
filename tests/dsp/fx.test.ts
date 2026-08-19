@@ -86,6 +86,10 @@ describe('FX_DESCRIPTOR', () => {
       'delay-time', 'delay-feedback', 'delay-tone', 'delay-width', 'delay-mix',
       'reverb-predelay', 'reverb-size', 'reverb-decay', 'reverb-damping', 'reverb-mix',
       'output-trim',
+      // Appended. New parameters go on the END and nowhere else: the plugin
+      // publishes descriptor order as VST3 parameter indices, so an insertion
+      // re-points automation lanes in projects that are already saved.
+      'output-glue',
     ]);
   });
 });
@@ -517,6 +521,105 @@ describe('transparency at defaults', () => {
     }
     expect(peak).toBeLessThanOrEqual(1.5);
     expect(peak).toBeGreaterThan(1.0);
+  });
+
+  /*
+   * Glue is the old always-on output curve, brought back as something you ask
+   * for. Both halves of that are load-bearing and both are asserted here: at
+   * zero the chain is still the transparent one above (bit-exact, tested by the
+   * cases before this), and turned up it must genuinely colour the signal
+   * instead of politely doing almost nothing.
+   */
+  function glued(input: Float32Array, amount: number): Float32Array {
+    const fx = new FxChain(SR);
+    neutral(fx);
+    set(fx, 'output-glue', amount);
+    fx.reset();
+    const out = Float32Array.from(input);
+    fx.process(out, out.length);
+    return out;
+  }
+
+  /** Harmonic magnitude at `k` times the fundamental, relative to the whole. */
+  function harmonicRatio(buf: Float32Array, hz: number, k: number): number {
+    const n = 1 << Math.floor(Math.log2(buf.length));
+    let re = 0, im = 0, fund = 0, fundI = 0;
+    for (let i = 0; i < n; i++) {
+      const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (n - 1)));
+      const x = (buf[i] as number) * w;
+      const a = (2 * Math.PI * hz * k * i) / SR;
+      re += x * Math.cos(a); im += x * Math.sin(a);
+      const b = (2 * Math.PI * hz * i) / SR;
+      fund += x * Math.cos(b); fundI += x * Math.sin(b);
+    }
+    return Math.hypot(re, im) / Math.hypot(fund, fundI);
+  }
+
+  it('is bit-exact bypass at zero, on a hot signal as well as a quiet one', () => {
+    for (const amp of [0.1, 0.95]) {
+      const input = sine(2048, 220, amp);
+      const out = glued(input, 0);
+      for (let i = 0; i < input.length; i++) {
+        expect(out[i], `amp ${amp} sample ${i}`).toBe(input[i]);
+      }
+    }
+  });
+
+  it('colours the signal once it is turned up, more at full than at half', () => {
+    const input = sine(4096, 220, 0.9);
+    const clean = harmonicRatio(glued(input, 0), 220, 3);
+    const half = harmonicRatio(glued(input, 0.5), 220, 3);
+    const full = harmonicRatio(glued(input, 1), 220, 3);
+    // The clean path has no shaping at all, so its third harmonic is numerical
+    // noise; the glued paths must sit far above it and rise with the amount.
+    expect(half).toBeGreaterThan(clean * 100);
+    expect(full).toBeGreaterThan(half * 1.5);
+    expect(full).toBeGreaterThan(0.01);
+  });
+
+  it('squeezes peaks harder the louder the signal, which is the glue', () => {
+    const loss = (amp: number): number => {
+      const input = sine(4096, 220, amp);
+      const out = glued(input, 1);
+      let pIn = 0, pOut = 0;
+      for (let i = 0; i < input.length; i++) {
+        const a = Math.abs(input[i] as number), b = Math.abs(out[i] as number);
+        if (a > pIn) pIn = a;
+        if (b > pOut) pOut = b;
+      }
+      return 20 * Math.log10(pOut / pIn);
+    };
+    const quiet = loss(0.2);
+    const hot = loss(0.95);
+    expect(quiet).toBeGreaterThan(-0.15);   // near enough untouched down low
+    expect(hot).toBeLessThan(quiet - 0.5);  // and measurably compressed up high
+  });
+
+  it('keeps the safety ceiling with glue at full, and keeps it smooth', () => {
+    const input = sine(2048, 220, 2.5);
+    const out = glued(input, 1);
+    let peak = 0;
+    for (let i = 0; i < out.length; i++) {
+      const a = Math.abs(out[i] as number);
+      if (a > peak) peak = a;
+    }
+    expect(peak).toBeLessThanOrEqual(1.5);
+
+    // Two shapers in series must not produce a corner: same ramp test as the
+    // limiter's, with the glue engaged.
+    const fx = new FxChain(SR);
+    neutral(fx);
+    set(fx, 'output-glue', 1);
+    fx.reset();
+    const ramp = new Float32Array(4096);
+    for (let i = 0; i < ramp.length; i++) ramp[i] = (i / ramp.length) * 2;
+    fx.process(ramp, ramp.length);
+    let maxStep = 0;
+    for (let i = 1; i < ramp.length; i++) {
+      const step = Math.abs((ramp[i] as number) - (ramp[i - 1] as number));
+      if (step > maxStep) maxStep = step;
+    }
+    expect(maxStep).toBeLessThan(0.001);
   });
 
   it('limits without a discontinuity at the knee', () => {

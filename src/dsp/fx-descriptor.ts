@@ -109,5 +109,13 @@ export const FX_DESCRIPTOR: EngineDescriptor = {
       min: -24, max: 12, default: 0, curve: 'linear', mutability: 0.4,
       explain: 'Final level after all the effects, so you can match volume when a heavy setting makes the patch louder or quieter. A safety limiter still catches anything above the rails.',
     },
+    // Appended, and it must stay last: the plugin maps descriptor order onto
+    // VST3 parameter indices, so inserting above this line would re-point
+    // automation that hosts have already written.
+    {
+      id: 'output-glue', name: 'Glue', group: 'Output', unit: 'pct',
+      min: 0, max: 1, default: 0, curve: 'linear', mutability: 0.5,
+      explain: 'Rounds the tops off the loudest peaks, and rounds them a little harder the louder the signal gets. That level-dependent squeeze is what people mean when they call a mix smooth or glued together rather than sharp and separate: quiet passages come through untouched, loud ones thicken slightly and gain a faint warmth that was not in the notes. At zero the output is passed on exactly as it arrived, so this is something you add on purpose; at full it costs about a decibel of level, which Output above puts back. The safety limiter sits after it either way, so this is character, never protection.',
+    },
   ],
 };

@@ -190,6 +190,100 @@ describe('FmVoice', () => {
     expect(brightnessAt(110, 1)).toBeGreaterThan(brightnessAt(110, 0) * 0.9);
   });
 
+  /**
+   * Touch is the whole reason velocity is interesting on an FM voice: on a real
+   * tine, playing harder drives the tine harder, so the timbre opens up. These
+   * measure spectrum, not level — "louder" would pass a level test trivially.
+   */
+  it('leaves the timbre untouched by velocity when Touch is zero', () => {
+    const render = (velocity: number): Float32Array => {
+      const v = FmEngine.allocVoice(SR);
+      v.setParam(idx('key-scale'), 0);
+      v.setParam(idx('amp-sustain'), 1);
+      v.setParam(idx('mod-sustain'), 1);
+      v.setParam(idx('index'), 6);
+      v.noteOn(220, velocity, 0);
+      const warm = new Float32Array(4096);
+      v.render(warm, 0, 4096);
+      const tail = new Float32Array(4096);
+      v.render(tail, 0, 4096);
+      return tail;
+    };
+    // Same shape, different gain: dividing out the velocity ratio must give
+    // back the same samples bit for bit, so the default cannot alter one sound.
+    const soft = render(0.25);
+    const hard = render(1);
+    for (let i = 0; i < soft.length; i++) {
+      expect((soft[i] as number) * 4).toBeCloseTo(hard[i] as number, 6);
+    }
+  });
+
+  it('opens the timbre up as velocity rises once Touch is set', () => {
+    const brightnessAt = (velocity: number, touch: number): number => {
+      const v = FmEngine.allocVoice(SR);
+      v.setParam(idx('key-scale'), 0);
+      v.setParam(idx('amp-sustain'), 1);
+      v.setParam(idx('mod-sustain'), 1);
+      v.setParam(idx('index'), 6);
+      v.setParam(idx('vel-index'), touch);
+      v.noteOn(220, velocity, 0);
+      const warm = new Float32Array(4096);
+      v.render(warm, 0, 4096);
+      const tail = new Float32Array(4096);
+      v.render(tail, 0, 4096);
+      return highBandRatio(tail, 1500);
+    };
+    const soft = brightnessAt(0.3, 0.8);
+    const hard = brightnessAt(1, 0.8);
+    expect(hard).toBeGreaterThan(soft * 2);
+    // And full velocity is exactly the patch's own brightness: Touch scales the
+    // authored Index down for softer notes, it never pushes past it.
+    expect(brightnessAt(1, 0.8)).toBeCloseTo(brightnessAt(1, 0), 12);
+    expect(brightnessAt(0.3, 0.8)).toBeLessThan(brightnessAt(0.3, 0));
+  });
+
+  it('weights the opening towards the top of the velocity range', () => {
+    const scaleAt = (velocity: number): number => {
+      // The index multiplier is 1 - amount * (1 - v^2); with amount 1 that is
+      // v^2, so the mid of the range must sit well below the mid of the effect.
+      const v = FmEngine.allocVoice(SR);
+      v.setParam(idx('key-scale'), 0);
+      v.setParam(idx('amp-sustain'), 1);
+      v.setParam(idx('mod-sustain'), 1);
+      v.setParam(idx('index'), 6);
+      v.setParam(idx('vel-index'), 1);
+      v.noteOn(220, velocity, 0);
+      const warm = new Float32Array(4096);
+      v.render(warm, 0, 4096);
+      const tail = new Float32Array(4096);
+      v.render(tail, 0, 4096);
+      return highBandRatio(tail, 1500);
+    };
+    const half = scaleAt(0.5);
+    const full = scaleAt(1);
+    // A linear map would put half the brightness at half velocity; squared puts
+    // far less, which is what makes the last part of the reach feel like a bark.
+    expect(half).toBeLessThan(full * 0.5);
+  });
+
+  it('cannot be driven past its authored brightness by an over-range velocity', () => {
+    const bright = (velocity: number): number => {
+      const v = FmEngine.allocVoice(SR);
+      v.setParam(idx('key-scale'), 0);
+      v.setParam(idx('amp-sustain'), 1);
+      v.setParam(idx('mod-sustain'), 1);
+      v.setParam(idx('index'), 6);
+      v.setParam(idx('vel-index'), 1);
+      v.noteOn(220, velocity, 0);
+      const warm = new Float32Array(4096);
+      v.render(warm, 0, 4096);
+      const tail = new Float32Array(4096);
+      v.render(tail, 0, 4096);
+      return highBandRatio(tail, 1500);
+    };
+    expect(bright(4)).toBeCloseTo(bright(1), 12);
+  });
+
   it('does not grow the heap across a sustained render', () => {
     expect(typeof global.gc, 'run vitest with --expose-gc').toBe('function');
     const v = FmEngine.allocVoice(SR);

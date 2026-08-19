@@ -39,6 +39,20 @@ const ENGINE: EngineDescriptor = {
   ],
 };
 
+/** The same engine after a parameter was APPENDED, which is how a descriptor is
+ *  allowed to grow: the plugin maps descriptor order onto VST3 parameter
+ *  indices, so anything but appending re-points automation a host already
+ *  wrote. Patches must survive it as a non-event. */
+const ENGINE_APPENDED: EngineDescriptor = {
+  ...ENGINE,
+  params: [
+    param('cutoff', 20, 18000, 1800),
+    param('resonance', 0, 1, 0.15),
+    param('drive', 0, 1, 0.2),
+    param('touch', 0, 1, 0),        // appended, default off
+  ],
+};
+
 /** The same engine after a parameter was inserted in the middle. */
 const ENGINE_GREW: EngineDescriptor = {
   ...ENGINE,
@@ -93,6 +107,21 @@ describe('patch format', () => {
     // The new parameter takes its default and says so.
     expect(byId['keytrack']).toBeCloseTo(0.5, 6);
     expect(loaded?.warnings.join(' ')).toMatch(/not in the patch, using defaults/);
+  });
+
+  it('survives a parameter being appended to the end of the engine', () => {
+    const patch = serialisePatch({ engine: ENGINE, values: [4200, 0.7, 0.33] });
+    const loaded = loadPatch(patch, ENGINE_APPENDED);
+
+    expect(loaded).not.toBeNull();
+    const byId = toKeyed(ENGINE_APPENDED, loaded?.values ?? new Float32Array());
+    expect(byId['cutoff']).toBeCloseTo(4200, 5);
+    expect(byId['resonance']).toBeCloseTo(0.7, 5);
+    expect(byId['drive']).toBeCloseTo(0.33, 5);
+    // The appended parameter takes its default, which is why a default of zero
+    // makes a new parameter inaudible on every sound anyone has already saved.
+    expect(byId['touch']).toBe(0);
+    expect(loaded?.warnings.join(' ')).toMatch(/1 parameter\(s\) not in the patch, using defaults/);
   });
 
   it('ignores parameters a newer build added, and says so', () => {

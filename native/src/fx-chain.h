@@ -36,6 +36,7 @@ namespace sigil {
 namespace fxchain {
 
 using sigil::fx::flush;
+using sigil::fx::glueOut;
 using sigil::fx::limitOut;
 using sigil::fx::onePole;
 using sigil::fx::sat;
@@ -86,12 +87,16 @@ public:
     gate();
     const bool onChorus = onChorus_, onDelay = onDelay_, onReverb = onReverb_;
     for (int n = 0; n < count; n++) {
-      for (int i = 0; i < N_PARAMS; i++) v_[i] = static_cast<float>(sm_[static_cast<size_t>(i)].next());
+      step();
       double x = front(buffer[n], v_);
       if (onChorus) x = chorus_.process(x, v_);
       if (onDelay) x = delay_.process(x, v_);
       if (onReverb) x = reverb_.process(x, v_);
-      x = limitOut(x * static_cast<double>(v_[P_TRIM]));
+      // Trim first, exactly as the old always-on stage was driven; the limiter
+      // stays behind the glue, so glue 0 is `limitOut(x * trim)` untouched.
+      const double t = x * static_cast<double>(v_[P_TRIM]);
+      const double glue = static_cast<double>(v_[P_GLUE]);
+      x = limitOut(glue > 0.0 ? glueOut(t, glue) : t);
       buffer[n] = static_cast<float>(x == x ? x : 0.0);
     }
   }
@@ -101,7 +106,7 @@ public:
     gate();
     const bool onChorus = onChorus_, onDelay = onDelay_, onReverb = onReverb_;
     for (int n = 0; n < count; n++) {
-      for (int i = 0; i < N_PARAMS; i++) v_[i] = static_cast<float>(sm_[static_cast<size_t>(i)].next());
+      step();
       const double li = left[n], ri = right[n];
       const double mid = front((li + ri) * 0.5, v_);
       const double side = (li - ri) * 0.5;
@@ -110,7 +115,10 @@ public:
       if (onDelay) { delay_.processStereo(l, r, v_); l = delay_.oL; r = delay_.oR; }
       if (onReverb) { reverb_.processStereo(l, r, v_); l = reverb_.oL; r = reverb_.oR; }
       const double trim = v_[P_TRIM];
-      l = limitOut(l * trim); r = limitOut(r * trim);
+      const double glue = v_[P_GLUE];
+      const double tl = l * trim, tr = r * trim;
+      l = limitOut(glue > 0.0 ? glueOut(tl, glue) : tl);
+      r = limitOut(glue > 0.0 ? glueOut(tr, glue) : tr);
       left[n] = static_cast<float>(l == l ? l : 0.0);
       right[n] = static_cast<float>(r == r ? r : 0.0);
     }
@@ -140,10 +148,49 @@ private:
     onChorus_ = static_cast<double>(v_[P_CH_MIX]) > SILENT;
     onDelay_ = static_cast<double>(v_[P_DL_MIX]) > SILENT;
     onReverb_ = static_cast<double>(v_[P_RV_MIX]) > SILENT;
-    if (onChorus_ && !wasChorus_) chorus_.reset();
-    if (onDelay_ && !wasDelay_) delay_.reset();
-    if (onReverb_ && !wasReverb_) reverb_.reset();
+    if (onChorus_ && !wasChorus_) { chorus_.reset(); snapRange(P_CH_RATE, P_CH_WIDTH); }
+    if (onDelay_ && !wasDelay_) { delay_.reset(); snapRange(P_DL_TIME, P_DL_WIDTH); }
+    if (onReverb_ && !wasReverb_) { reverb_.reset(); snapRange(P_RV_PREDELAY, P_RV_DAMP); }
     wasChorus_ = onChorus_; wasDelay_ = onDelay_; wasReverb_ = onReverb_;
+  }
+
+  /** Settings of a unit just switched back on jump to target rather than
+   *  gliding from wherever they were left; they were not advanced per sample
+   *  while the unit was silent (see step()) and its buffers have just been
+   *  cleared. Mix values are never snapped: a mix has to fade. */
+  void snapRange(int from, int to) {
+    for (int i = from; i <= to; i++) {
+      const double t = static_cast<double>(target_[i]);
+      sm_[static_cast<size_t>(i)].snap(t);
+      v_[i] = static_cast<float>(t);
+    }
+  }
+
+  /**
+   * Advance the smoothers this sample actually consumes.
+   *
+   * Mirrors fx.ts step(): the eleven parameters belonging to switched-off units
+   * are not read by anything, so they are not advanced per sample - they still
+   * advance once per block in gate(), and are snapped on the way back in. The
+   * three mix values stay in the per-sample set because gate() tests them and a
+   * mix must fade without a step.
+   */
+  void step() {
+    for (int i = P_DRIVE; i <= P_CRUSH_BITS; i++) v_[i] = static_cast<float>(sm_[static_cast<size_t>(i)].next());
+    if (onChorus_) {
+      for (int i = P_CH_RATE; i <= P_CH_WIDTH; i++) v_[i] = static_cast<float>(sm_[static_cast<size_t>(i)].next());
+    }
+    v_[P_CH_MIX] = static_cast<float>(sm_[P_CH_MIX].next());
+    if (onDelay_) {
+      for (int i = P_DL_TIME; i <= P_DL_WIDTH; i++) v_[i] = static_cast<float>(sm_[static_cast<size_t>(i)].next());
+    }
+    v_[P_DL_MIX] = static_cast<float>(sm_[P_DL_MIX].next());
+    if (onReverb_) {
+      for (int i = P_RV_PREDELAY; i <= P_RV_DAMP; i++) v_[i] = static_cast<float>(sm_[static_cast<size_t>(i)].next());
+    }
+    v_[P_RV_MIX] = static_cast<float>(sm_[P_RV_MIX].next());
+    v_[P_TRIM] = static_cast<float>(sm_[P_TRIM].next());
+    v_[P_GLUE] = static_cast<float>(sm_[P_GLUE].next());
   }
 
   /** Drive and bitcrush: memoryless-plus-tilt, and inherently one-channel. */

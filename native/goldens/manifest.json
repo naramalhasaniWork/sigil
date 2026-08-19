@@ -2321,7 +2321,7 @@
       "output": {
         "file": "fxchain_max_mono.f32",
         "frames": 24000,
-        "sha256": "c21ee198edffa7723fd82d011dc4417fea7b6a5ad2e383c6ba6d0f4c891a9ddd"
+        "sha256": "5450e061dc747c634d11fd47283345dd779e85445048fd4001f843ded033eb24"
       },
       "input": {
         "file": "fxchain_max_mono.in.f32",
@@ -2355,7 +2355,8 @@
           "reverb-decay": 12000,
           "reverb-damping": 1,
           "reverb-mix": 1,
-          "output-trim": 12
+          "output-trim": 12,
+          "output-glue": 1
         },
         "blockSizes": [
           1,
@@ -2659,7 +2660,7 @@
       "output": {
         "file": "fxchain_max_stereo.f32",
         "frames": 48000,
-        "sha256": "fa33cbae6a696e6b56a4fadbcf539a2c8b269581bdc74f67734616982ad9b909"
+        "sha256": "d2399208f4cafbda866561394349b53b40304835493dd848d785c3a788b78316"
       },
       "input": {
         "file": "fxchain_max_stereo.in.f32",
@@ -2693,7 +2694,8 @@
           "reverb-decay": 12000,
           "reverb-damping": 1,
           "reverb-mix": 1,
-          "output-trim": 12
+          "output-trim": 12,
+          "output-glue": 1
         },
         "blockSizes": [
           1,
@@ -3031,7 +3033,8 @@
           "reverb-decay": 200,
           "reverb-damping": 0,
           "reverb-mix": 0,
-          "output-trim": -24
+          "output-trim": -24,
+          "output-glue": 0
         },
         "blockSizes": [
           1,
@@ -3369,7 +3372,8 @@
           "reverb-decay": 200,
           "reverb-damping": 0,
           "reverb-mix": 0,
-          "output-trim": -24
+          "output-trim": -24,
+          "output-glue": 0
         },
         "blockSizes": [
           1,
@@ -7868,6 +7872,7 @@
           2200,
           0.7537500262260437,
           1,
+          0,
           0
         ]
       },
@@ -7922,6 +7927,7 @@
           12000,
           0.014999999664723873,
           1,
+          0,
           0
         ]
       },
@@ -7976,6 +7982,7 @@
           200,
           1,
           1,
+          0,
           0
         ]
       },
@@ -8030,6 +8037,7 @@
           2200,
           0.7537500262260437,
           1,
+          0,
           0
         ]
       },
@@ -8084,6 +8092,7 @@
           12000,
           0.014999999664723873,
           1,
+          0,
           0
         ]
       },
@@ -8138,6 +8147,7 @@
           200,
           1,
           1,
+          0,
           0
         ]
       },
@@ -8153,7 +8163,7 @@
       "output": {
         "file": "sigilchain_analog_fx.f32",
         "frames": 5424,
-        "sha256": "6ea02415a431c159cdf3a7736c33ac7220179051d132f06f987953e9c4684559"
+        "sha256": "ac042f695f83882ea8902645395d442008db332482441bf08a53422b201544e9"
       },
       "input": null,
       "tolClass": "chain",
@@ -14914,7 +14924,7 @@
       "output": {
         "file": "voice_fm_max_a4.f32",
         "frames": 24000,
-        "sha256": "bab64e28b7d759226629ad1c929f40a73c961d1911382143c0a19d11b4b4d43f"
+        "sha256": "ea684e8c5e64d342aa0b1b6ecd811e7d14d194e8055da0f4e09809cb1cb5f085"
       },
       "input": null,
       "tolClass": "chain",
@@ -14951,7 +14961,8 @@
           "mod-attack": 4000,
           "mod-decay": 8000,
           "mod-sustain": 1,
-          "mod-release": 8000
+          "mod-release": 8000,
+          "vel-index": 1
         },
         "freqHz": 440,
         "velocity": 0.8,
@@ -15259,7 +15270,7 @@
       "output": {
         "file": "voice_fm_mid_a4.f32",
         "frames": 24000,
-        "sha256": "a9de630550df6699e2f13b2ecd341471c64bae4ddb82c1d8c759b0575d2a3c5e"
+        "sha256": "0d13468dc8a510b684b5883fabbbec7b51adfdddd9b78141b6d41798ae8c2f27"
       },
       "input": null,
       "tolClass": "chain",
@@ -15296,7 +15307,8 @@
           "mod-attack": 2000.25,
           "mod-decay": 4000.5,
           "mod-sustain": 0.5,
-          "mod-release": 4000.5
+          "mod-release": 4000.5,
+          "vel-index": 0.5
         },
         "freqHz": 440,
         "velocity": 0.8,
@@ -15641,7 +15653,8 @@
           "mod-attack": 0.5,
           "mod-decay": 1,
           "mod-sustain": 0,
-          "mod-release": 1
+          "mod-release": 1,
+          "vel-index": 0
         },
         "freqHz": 440,
         "velocity": 0.8,

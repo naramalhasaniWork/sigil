@@ -12,6 +12,12 @@ import type { Preset } from '@/dsp/presets';
  * FX safety saturator distorts audibly at 0 dBFS). Presets that are
  * monophonic by nature (ballast, serrated-bass) are voiced well mono and
  * simply are that.
+ *
+ * Touch (`vel-index`) is off unless a preset asks for it, and where a preset
+ * does ask, its Index is the brightness at FULL force: Touch only pulls the
+ * brightness back as you play softer. So the loudest, brightest case a preset
+ * can produce is the one it was voiced and level-checked at, and the struck and
+ * plucked instruments get their dynamics underneath that.
  */
 export const FM_PRESETS: readonly Preset[] = [
   {
@@ -50,6 +56,10 @@ export const FM_PRESETS: readonly Preset[] = [
       'algorithm': 2, 'op1-ratio': 1, 'op1-level': 0.8, 'op2-ratio': 1, 'op2-level': 0.85,
       'op3-ratio': 1, 'op3-fine': 0.04, 'op3-level': 0.65, 'op4-ratio': 14, 'op4-level': 1,
       'index': 2.8, 'key-scale': 0.8, 'feedback': 0.1, 'spread': 0.06, 'balance': 0.35,
+      // The tine is driven harder when you hit it harder, so the strike goes
+      // from a soft bell to a bark. Measured: attack centroid 836 -> 1999 Hz
+      // across the velocity range.
+      'vel-index': 0.7,
       'amp-attack': 0.5, 'amp-decay': 3200, 'amp-sustain': 0.18, 'amp-release': 450,
       'mod-attack': 0.5, 'mod-decay': 160, 'mod-sustain': 0.12, 'mod-release': 250,
     },
@@ -61,6 +71,7 @@ export const FM_PRESETS: readonly Preset[] = [
       'algorithm': 2, 'op1-ratio': 1, 'op2-ratio': 2, 'op2-level': 0.5,
       'op3-ratio': 1, 'op3-fine': 0.03, 'op3-level': 0.7, 'op4-ratio': 8, 'op4-level': 0.3,
       'index': 2.8, 'key-scale': 0.7, 'feedback': 0.1, 'spread': 0.15, 'balance': 0.4,
+      'vel-index': 0.4,   // plucked harder, brighter
       'amp-attack': 0.5, 'amp-decay': 1800, 'amp-sustain': 0.15, 'amp-release': 450,
       'mod-attack': 0.5, 'mod-decay': 300, 'mod-sustain': 0.1, 'mod-release': 250,
     },
@@ -168,6 +179,9 @@ export const FM_PRESETS: readonly Preset[] = [
       'algorithm': 0, 'op1-ratio': 1, 'op1-level': 0.95, 'op2-ratio': 4, 'op2-fine': 0.03,
       'op2-level': 0.65, 'op4-ratio': 3, 'op4-level': 0,
       'index': 3.8, 'key-scale': 0.9, 'feedback': 0, 'spread': 0.05, 'balance': 0.3,
+      // A harder mallet strike excites the bar's upper partials, not just more
+      // of the same tone.
+      'vel-index': 0.55,
       'amp-attack': 0.5, 'amp-decay': 450, 'amp-sustain': 0, 'amp-release': 350,
       'mod-attack': 0.5, 'mod-decay': 70, 'mod-sustain': 0, 'mod-release': 80,
     },
@@ -179,6 +193,7 @@ export const FM_PRESETS: readonly Preset[] = [
       'algorithm': 2, 'op1-ratio': 1, 'op2-ratio': 5, 'op2-level': 0.4,
       'op3-ratio': 2, 'op3-level': 0.35, 'op4-ratio': 10, 'op4-level': 0.2,
       'index': 2.6, 'key-scale': 0.8, 'feedback': 0.12, 'spread': 0.08, 'balance': 0.3,
+      'vel-index': 0.45,   // a lamella plucked further brightens as it releases
       'amp-attack': 0.5, 'amp-decay': 700, 'amp-sustain': 0, 'amp-release': 300,
       'mod-attack': 0.5, 'mod-decay': 60, 'mod-sustain': 0, 'mod-release': 80,
     },
@@ -193,6 +208,10 @@ export const FM_PRESETS: readonly Preset[] = [
       'algorithm': 2, 'op1-ratio': 1, 'op1-level': 0.85, 'op2-ratio': 3, 'op2-level': 0.6,
       'op3-ratio': 2, 'op3-level': 0.45, 'op4-ratio': 6, 'op4-level': 0.25,
       'index': 3.6, 'key-scale': 0.8, 'feedback': 0.2, 'spread': 0.05, 'balance': 0.35,
+      // Deliberately small: a plectrum is released by the jack at a speed the
+      // player barely controls, which is why a real harpsichord has almost no
+      // dynamics. Enough to reward touch, not enough to pretend it is a piano.
+      'vel-index': 0.3,
       'amp-attack': 0.5, 'amp-decay': 1400, 'amp-sustain': 0.12, 'amp-release': 200,
       'mod-attack': 0.5, 'mod-decay': 500, 'mod-sustain': 0.15, 'mod-release': 200,
     },

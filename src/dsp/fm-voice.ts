@@ -13,6 +13,8 @@ const P_SPREAD = 16;
 const P_BALANCE = 17;
 const P_AMP_A = 18;
 const P_MOD_A = 22;
+const P_ENV_LAST = 25;
+const P_VEL_INDEX = 26;
 
 const N_OPS = 4;
 const MAX_ALGO = 4;
@@ -60,6 +62,7 @@ class FmVoice implements EngineVoice {
   private algo = 0;
   private carrierMask = 1;
   private keyScale = 1;
+  private velIndexScale = 1;
 
   private ph0 = 0;
   private ph1 = 0;
@@ -92,7 +95,7 @@ class FmVoice implements EngineVoice {
     if (index < 0 || index >= this.params.length) return;
     this.params[index] = value;
     if (index === P_ALGO) this.applyRouting();
-    else if (index >= P_AMP_A) this.applyEnvelopes();
+    else if (index >= P_AMP_A && index <= P_ENV_LAST) this.applyEnvelopes();
   }
 
   private applyRouting(): void {
@@ -135,6 +138,17 @@ class FmVoice implements EngineVoice {
 
     const ks = Math.pow(REF_HZ / this.baseFreq, this.params[P_KEY_SCALE] as number);
     this.keyScale = ks < 0.15 ? 0.15 : ks > 2.5 ? 2.5 : ks;
+
+    // Velocity into brightness, which is what velocity does on a real tine: hit
+    // it harder and it is driven harder, so the timbre opens up rather than only
+    // getting louder. It scales the patch's Index DOWN as you play softer, so
+    // Index stays the sound at full force and no amount of Touch can push a
+    // preset past the brightness — or the level — it was voiced at. Squared, so
+    // the opening is weighted into the top of the range where a player expects
+    // to find the bark; linear would spend most of its effect on the quiet notes
+    // nobody is reaching for.
+    const vel = this.velocity < 0 ? 0 : this.velocity > 1 ? 1 : this.velocity;
+    this.velIndexScale = 1 - (this.params[P_VEL_INDEX] as number) * (1 - vel * vel);
 
     const mask = this.carrierMask;
     let n = 0;
@@ -216,7 +230,7 @@ class FmVoice implements EngineVoice {
     const ls = this.levelSmooth;
     const gs = this.gainSmooth;
     const algo = this.algo;
-    const ks = this.keyScale;
+    const ks = this.keyScale * this.velIndexScale;
     const amp = this.velocity * 0.32;
 
     this.indexSmooth.setTarget(this.params[P_INDEX] as number);

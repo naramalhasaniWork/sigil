@@ -106,5 +106,13 @@ export const FM_DESCRIPTOR: EngineDescriptor = {
       min: 1, max: 8000, default: 300, curve: 'exp', mutability: 0.6,
       explain: 'How the overtones fade once you let go. Making this shorter than the carrier release means notes soften into pure sine as they die away.',
     },
+    // Appended, and it must stay last: the plugin exposes descriptor order as
+    // VST3 parameter indices, so inserting above this line would re-point every
+    // automation lane a host has already written.
+    {
+      id: 'vel-index', name: 'Touch', group: 'Tone', unit: 'pct',
+      min: 0, max: 1, default: 0, curve: 'linear', mutability: 0.7,
+      explain: 'How much of the brightness you play rather than set. At zero every note is as bright as Index says, however gently you hit it. Turn it up and a soft note keeps the tone but loses the bite while a hard one opens all the way to the Index setting — which is why a real electric piano barks when you dig in instead of only getting louder. The change is deliberately weighted towards the top of the range, so the last part of your reach is where the tone snaps open.',
+    },
   ],
 };
