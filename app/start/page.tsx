@@ -14,6 +14,17 @@ const DESCRIPTION =
   'Six synthesis engines in a browser — analog, FM, physical modelling, granular, '
   + 'wavetable and sampler. Free, no install, nothing stored. Also a VST3 plugin.';
 
+/**
+ * The share card is the hero screenshot itself, for the same reason the page
+ * leads with it: a link to a synthesiser should show the synthesiser.
+ */
+const SHARE_IMAGE = {
+  url: '/shots/sigil-sculpt.png',
+  width: 2240,
+  height: 1800,
+  alt: 'SIGIL running its FM engine, with a live oscilloscope and spectrum.',
+};
+
 export const metadata: Metadata = {
   // `absolute` because the root layout's "%s · SIGIL" template would otherwise
   // make this read "SIGIL - a sound design instrument · SIGIL".
@@ -23,8 +34,14 @@ export const metadata: Metadata = {
     title: 'SIGIL — a sound design instrument',
     description: DESCRIPTION,
     type: 'website',
+    images: [SHARE_IMAGE],
   },
-  twitter: { card: 'summary_large_image', title: 'SIGIL', description: DESCRIPTION },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'SIGIL',
+    description: DESCRIPTION,
+    images: [SHARE_IMAGE],
+  },
   /*
    * The landing page is the one thing here that SHOULD be indexed. The root
    * layout marks the app noindex — it is a private instrument behind a gate —
