@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mark candidates</title>
+<style>
+  :root {
+    --bg: #0E0E0E;
+    --panel: #171717;
+    --ink: #F5F1E6;
+    --accent: #FF6B6B;
+    --muted: #7D786C;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; }
+  body {
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    padding: 40px 20px 96px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 34px; }
+  .label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--ink);
+  }
+  h1 {
+    font-size: 40px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; line-height: 1; margin: 0;
+  }
+  h2 {
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.18em; margin: 0; color: var(--muted);
+  }
+  .lede { font-size: 15px; line-height: 1.6; max-width: 64ch; margin: 0; opacity: 0.85; }
+  .rule { border-top: 3px solid var(--muted); }
+
+  .card {
+    border: 3px solid var(--ink);
+    background: var(--panel);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .head { display: flex; flex-direction: column; gap: 7px; }
+  .forname { font-size: 9px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.55; }
+  .name { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+  .why { font-size: 13px; line-height: 1.55; max-width: 68ch; margin: 0; opacity: 0.88; }
+
+  /* The size strip sits on the real ground, not the panel, so 16px is judged
+     against the colour it actually ships on. */
+  .sizes {
+    display: flex; align-items: flex-end; gap: 30px; flex-wrap: wrap;
+    background: var(--bg); border: 3px solid var(--muted); padding: 18px 22px;
+  }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .cell > span { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; color: var(--muted); }
+  .cell svg { display: block; }
+
+  /* Header scale: the mark beside type, at the size it ships in the app chrome. */
+  .lockup { display: flex; align-items: center; gap: 10px; }
+  .lockup .wm {
+    font-weight: 700; text-transform: uppercase; font-size: 18px;
+    letter-spacing: -0.03em; line-height: 1; color: var(--ink);
+  }
+  code { opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header style="display:flex;flex-direction:column;gap:14px">
+    <p class="label" style="opacity:.6">Mark candidates</p>
+    <h1>Eight marks</h1>
+    <p class="lede">
+      Two marks each for the four best-available names. Every mark is drawn once on a
+      24-unit grid and shown at 120, 40, 22 and 16px on <code>#0E0E0E</code> — one ink,
+      one accent, flat fills, sharp corners, no gradients and no soft shadows.
+    </p>
+    <p class="lede">
+      16px is the only test that counts, so it is the size to look at first. Marks that
+      resolved into a letterform at 16px, or whose accent disappeared, were cut and
+      redrawn rather than kept for the large view.
+    </p>
+  </header>
+
+  <div class="rule"></div>
+
+  <!-- ================= mark definitions ================= -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+
+    <!-- 1. STRIKE — two masses converging, and the contact between them.
+         Deliberately NOT a bar crossing a bar: that read as a dagger at 16px. -->
+    <symbol id="m1" viewBox="0 0 24 24">
+      <polygon points="2,3.4 9.2,6.4 9.2,18.6 2,21.4" fill="#F5F1E6"/>
+      <polygon points="22,3 16.2,7 16.2,14.6 22,18" fill="#F5F1E6"/>
+      <polygon points="10.6,10.8 14.4,9 14.4,14 10.6,13" fill="#FF6B6B"/>
+    </symbol>
+
+    <!-- 2. FISSURE — a mass opening along a fault, one chip shaken loose.
+         Fissure widened from the first draft so the accent shard survives 16px. -->
+    <symbol id="m2" viewBox="0 0 24 24">
+      <polygon points="3,2.6 11,2.6 7.4,10.4 10.2,21.4 3,21.4" fill="#F5F1E6"/>
+      <polygon points="15,2.6 21,2.6 21,21.4 14,21.4 16.6,13.2" fill="#F5F1E6"/>
+      <polygon points="11,10.6 14.8,11.8 13.5,16 10.2,14.8" fill="#FF6B6B"/>
+    </symbol>
+
+    <!-- 3. AGGREGATE — sound as loose material rather than a continuous line -->
+    <symbol id="m3" viewBox="0 0 24 24">
+      <polygon points="2.4,12.6 8.4,9.8 10.4,15.4 4.2,17.6" fill="#F5F1E6"/>
+      <polygon points="10.6,3.2 16.8,4.8 15.2,9.8 9.8,8.4" fill="#FF6B6B"/>
+      <polygon points="17.2,12.2 21.6,13.6 20.2,17.8 16.2,16.2" fill="#F5F1E6"/>
+      <polygon points="8.2,19 12.4,18.2 12.9,21.6 8.6,21.6" fill="#F5F1E6"/>
+    </symbol>
+
+    <!-- 4. TOLL — two walls of a resonator, left open so it never closes into a
+         circle, and the mass that drives them -->
+    <symbol id="m4" viewBox="0 0 24 24">
+      <path d="M9 3.4 C5 9, 3.6 15, 3.6 20.6" stroke="#F5F1E6" stroke-width="3.2" fill="none"/>
+      <path d="M15 3.4 C19 9, 20.4 15, 20.4 20.6" stroke="#F5F1E6" stroke-width="3.2" fill="none"/>
+      <polygon points="10.3,7.6 13.7,7.6 12.7,19.4 11.3,19.4" fill="#FF6B6B"/>
+    </symbol>
+
+    <!-- 5. ANVIL & TINE — a struck body and the partials it throws.
+         Tines truncated rather than needled: needle tips vanished at 16px. -->
+    <symbol id="m5" viewBox="0 0 24 24">
+      <polygon points="3.6,15.4 20.4,15.4 22,21.4 2,21.4" fill="#F5F1E6"/>
+      <polygon points="7.4,15.4 10.6,15.4 10.1,3.2 7.9,3.2" fill="#F5F1E6"/>
+      <polygon points="14.6,15.4 17.4,15.4 17.1,8.4 15,8.4" fill="#FF6B6B"/>
+    </symbol>
+
+    <!-- 6. COMB — two streams of tines entering from opposite edges, overlapping -->
+    <symbol id="m6" viewBox="0 0 24 24">
+      <rect x="2.1" y="2.4" width="3" height="12.4" fill="#F5F1E6"/>
+      <rect x="7.7" y="9.2" width="3" height="12.4" fill="#F5F1E6"/>
+      <rect x="13.3" y="2.4" width="3" height="12.4" fill="#FF6B6B"/>
+      <rect x="18.9" y="9.2" width="3" height="12.4" fill="#F5F1E6"/>
+    </symbol>
+
+    <!-- 7. WINDOW — a fixed body of material and the one position being read.
+         Slab tilted off-axis so the silhouette is never a rectangle. -->
+    <symbol id="m7" viewBox="0 0 24 24">
+      <polygon points="2.6,5 11.2,3.2 11.2,20.4 2.6,22.2" fill="#F5F1E6"/>
+      <polygon points="16.4,2.1 20.4,1.3 20.4,18.5 16.4,19.3" fill="#F5F1E6"/>
+      <polygon points="12.4,4.4 15.2,3.8 15.2,19.9 12.4,20.5" fill="#FF6B6B"/>
+    </symbol>
+
+    <!-- 8. NOTCH — the filter, and the material it removed.
+         Bite deepened past centre and the edges sloped, so it reads as a notched
+         mass rather than the generic square it was in the first draft. -->
+    <symbol id="m8" viewBox="0 0 24 24">
+      <polygon points="2.5,3.6 16.4,1.4 16.4,8.6 7.6,12 16.4,15.4 16.4,22.6 2.5,20.6" fill="#F5F1E6"/>
+      <polygon points="18.7,8.6 22.7,12 18.7,15.4" fill="#FF6B6B"/>
+    </symbol>
+
+  </defs></svg>
+
+  <!-- ============================================================ -->
+  <h2>Flintbell</h2>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">01 · Flintbell</p>
+      <p class="name">Strike</p>
+      <p class="why">
+        Two masses driven together, with the accent as the contact between them. The
+        excitation event all six engines begin with — something hits something, and what
+        happens next is the sound. Drawn as converging blocks rather than one bar crossing
+        another, because a crossed bar read as a dagger once it got small.
+      </p>
+      <p class="why" style="opacity:.62">
+        Weakest of the eight, and worth saying so: at 16px the two facing masses still read
+        as a bowtie before they read as a strike. The blocks were made unequal to fight
+        that and it only half works. Keep it for the 40px view, not for the tab icon.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m1"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m1"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m1"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m1"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m1"/></svg><span class="wm">Flintbell</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">02 · Flintbell</p>
+      <p class="name">Fissure</p>
+      <p class="why">
+        A solid mass opening along a fault, with one chip shaken loose in the accent. The
+        attack transient — the instant a struck material gives — which is the part of a
+        sound the ear identifies an instrument by. Almost all of the mark is negative
+        space, so it holds its shape as it shrinks.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m2"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m2"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m2"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m2"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m2"/></svg><span class="wm">Flintbell</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <h2>Gravelbell</h2>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">03 · Gravelbell</p>
+      <p class="name">Aggregate</p>
+      <p class="why">
+        Four chips of unequal size and angle: sound handled as loose material instead of a
+        continuous line. That is granular synthesis stated literally, and it is also what
+        the name says. Solid fills rather than strokes, which is why it is still four
+        distinct pieces at 16px.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m3"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m3"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m3"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m3"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m3"/></svg><span class="wm">Gravelbell</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">04 · Gravelbell</p>
+      <p class="name">Toll</p>
+      <p class="why">
+        Two walls of a resonator, held open so the form never closes into a circle, and the
+        accent mass that drives them. Excitation inside a body is the whole of physical
+        modelling, and it is the mechanism the other five engines are all doing a version
+        of. The most literal mark here, and the most survivable when small.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m4"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m4"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m4"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m4"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m4"/></svg><span class="wm">Gravelbell</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <h2>Anviltine</h2>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">05 · Anviltine</p>
+      <p class="name">Anvil &amp; Tine</p>
+      <p class="why">
+        A heavy body and the two partials it throws off, at unequal length because a
+        harmonic series decays. The mass is the ground you strike; the tines are the only
+        part you hear. Both tines are truncated rather than pointed — needle tips
+        disappeared entirely at 16px.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m5"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m5"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m5"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m5"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m5"/></svg><span class="wm">Anviltine</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">06 · Anviltine</p>
+      <p class="name">Comb</p>
+      <p class="why">
+        Two streams of tines entering from opposite edges and overlapping in the middle:
+        material laid against itself, offset in time. It is what granular does with grains
+        and what wavetable does with adjacent frames, and it is the reason both engines
+        can sound like one moving body rather than a stack of copies.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m6"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m6"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m6"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m6"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m6"/></svg><span class="wm">Anviltine</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <h2>Frostlattice</h2>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">07 · Frostlattice</p>
+      <p class="name">Window</p>
+      <p class="why">
+        A fixed body of material, and the single position currently being read. That one
+        accent line is the wavetable scan position, the granular playhead and the sample
+        start point — the same idea in three engines, and the control that makes a static
+        table sound alive. The slab is tilted off-axis so its silhouette is never a
+        rectangle.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m7"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m7"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m7"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m7"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m7"/></svg><span class="wm">Frostlattice</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <p class="forname">08 · Frostlattice</p>
+      <p class="name">Notch</p>
+      <p class="why">
+        A slab with a wedge cut out of it, and the removed wedge set down beside it.
+        Subtractive synthesis said plainly: you arrive at the sound by taking material
+        away, and this is the only mark here that shows you what left. The bite runs past
+        centre and the edges slope, so the mass reads as notched rather than as a square
+        with a dent.
+      </p>
+    </div>
+    <div class="sizes">
+      <div class="cell"><svg width="120" height="120"><use href="#m8"/></svg><span>120</span></div>
+      <div class="cell"><svg width="40" height="40"><use href="#m8"/></svg><span>40</span></div>
+      <div class="cell"><svg width="22" height="22"><use href="#m8"/></svg><span>22</span></div>
+      <div class="cell"><svg width="16" height="16"><use href="#m8"/></svg><span>16</span></div>
+      <div class="cell"><div class="lockup"><svg width="22" height="22"><use href="#m8"/></svg><span class="wm">Frostlattice</span></div><span>lockup</span></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

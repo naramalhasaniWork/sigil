@@ -24,6 +24,24 @@ const OPEN_PATHS = [
   // would mean the one page meant to be shared and indexed was the one page
   // nobody could read.
   '/start',
+  /*
+   * The signup endpoint, for the same reason as /start and no other: the form
+   * lives on the open page, so gating its POST would mean the shareable page had
+   * a button that answered 307 to /gate. It authenticates nobody by design — it
+   * is a public write — and is protected by a per-IP rate limit and by accepting
+   * nothing but an address and an intent.
+   */
+  '/api/signup',
+  /*
+   * `/admin` is deliberately NOT here.
+   *
+   * It has its own lock (src/server/admin-auth.ts, SIGIL_ADMIN_KEY) which fails
+   * closed, so it does not need the gate — but it does not need to bypass it
+   * either. In private mode the gate in front of it is a free second lock and the
+   * only person who wants /admin already knows the passcode. In public mode this
+   * function returns early anyway, so listing it would change nothing there and
+   * would only weaken the private case.
+   */
 ];
 
 async function sha256Hex(text: string): Promise<string> {
