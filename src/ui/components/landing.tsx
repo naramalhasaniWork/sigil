@@ -37,9 +37,9 @@ const IDEAS: readonly { title: string; body: string }[] = [
       + 'on purpose.',
   },
   {
-    title: 'Built for hardware',
-    body: 'Bounce any sound to a WAV in a single tap, rendered at the sample rate the '
-      + 'Teenage Engineering KO II expects, so it loads onto the device ready to play.',
+    title: 'Export anything you make',
+    body: 'Bounce any sound to a WAV in a single tap, or record a take as you play it. '
+      + 'Drop the file into a sampler, a groovebox or another project and keep going.',
   },
   {
     title: 'Plays anywhere',
