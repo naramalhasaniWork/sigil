@@ -130,3 +130,33 @@ SIGIL_BRIDGE_SELFTEST=1 \
 
 It writes `[sigil-selftest]` lines to stderr. Note that it *moves* parameters on
 purpose, so leave it off for normal use.
+
+### When there are two of them
+
+Two SIGILs on two tracks is its own failure mode, because both editors are
+WebViews loading the same address — so they share one `localStorage`, and a key
+holding a sound there is a key every other instance loads. `sigil_editor_check`
+puts two processors and two editors in one process, in the order a DAW does it
+(the second arrives late, on top of a first that is already loaded and has been
+touched), then closes and reopens one underneath the other:
+
+```bash
+./native/build-plugin/sigil_editor_check_artefacts/Release/sigil_editor_check
+```
+
+It checks that each page moves its OWN processor and nobody else's, that host
+automation reaches only the instance it belongs to, that closing one editor
+leaves the other's page alive, and that nothing per-instance is left in the
+shared storage. It opens real windows, so it is not part of `ctest`.
+
+Two other modes, for looking rather than asserting:
+
+```bash
+# the same two instances through the VST3 host, wrapper and host window included
+SIGIL_EDITOR_VST3=native/build-plugin/SIGIL_artefacts/Release/VST3/SIGIL.vst3 \
+  ./native/build-plugin/sigil_editor_check_artefacts/Release/sigil_editor_check
+
+# hold N editors open and report what each page wrote to the shared storage
+SIGIL_EDITOR_COUNT=5 SIGIL_EDITOR_HOLD_MS=10000 \
+  ./native/build-plugin/sigil_editor_check_artefacts/Release/sigil_editor_check
+```

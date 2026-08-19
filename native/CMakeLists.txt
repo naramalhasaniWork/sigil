@@ -256,6 +256,38 @@ if(SIGIL_BUILD_PLUGIN)
     juce::juce_recommended_config_flags
     sigil_warning_relax)
 
+  # -------------------------------------------------------------------------
+  # Editor check: TWO processors with TWO editors in one process, which is what
+  # a DAW does the moment a second SIGIL lands on a second track. Both WebViews
+  # share one origin, so everything a browser keys on origin is shared between
+  # them; what must not be shared is which processor an editor is wired to.
+  #
+  # Not an add_test: it needs a window server and it opens real windows, so it
+  # would hang a headless ctest run. Run it by hand.
+  # -------------------------------------------------------------------------
+  juce_add_console_app(sigil_editor_check PRODUCT_NAME "sigil_editor_check")
+  target_sources(sigil_editor_check PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/editor_check.cpp)
+  target_include_directories(sigil_editor_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_definitions(sigil_editor_check PRIVATE
+    JUCE_WEB_BROWSER=1
+    JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    # So the same binary can also load the BUILT bundle through the VST3 host,
+    # which is the only way to exercise the wrapper and the host's window.
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_VST=0
+    JUCE_PLUGINHOST_AU=0
+    JUCE_REPORT_APP_USAGE=0)
+  target_compile_options(sigil_editor_check PRIVATE -Wno-macro-redefined)
+  target_link_libraries(sigil_editor_check PRIVATE
+    SIGIL
+    sigil_dsp
+    juce::juce_audio_utils
+    juce::juce_gui_extra
+    juce::juce_recommended_config_flags
+    sigil_warning_relax)
+
   add_test(NAME plugin_state COMMAND sigil_state_check)
   add_test(NAME plugin_host
     COMMAND sigil_host_check $<TARGET_BUNDLE_DIR:SIGIL_VST3>)

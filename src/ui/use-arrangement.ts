@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SerialisedPatch } from '@/audio/patch-format';
 import { loadArrangement, serialiseArrangement } from '@/audio/arrangement-format';
+import { inPlugin } from '@/audio/plugin-bridge';
 import type { ScaleName } from '@/dsp/chords';
 import { PPQ } from '@/dsp/sequencer';
 import { DEFAULT_ENGINE_ID, engineById } from '@/dsp/registry';
@@ -343,6 +344,19 @@ export function useArrangement(
   // ---- persistence -------------------------------------------------------
 
   useEffect(() => {
+    /*
+     * Song is not part of the plugin — the DAW owns arrangement, which is why
+     * the scope is hidden there — and every instance shares one WebView
+     * storage, so this key is not per-instance and never can be. Restoring it
+     * would pour one track's song into every other SIGIL in the project, and
+     * saving it would let whichever instance you touched last decide what the
+     * next one opened with. Same rule, same reason, as the session in
+     * use-instrument.ts.
+     */
+    if (inPlugin()) {
+      setRestored(true);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(ARRANGEMENT_KEY);
       if (raw !== null) {
@@ -360,7 +374,7 @@ export function useArrangement(
   }, []);
 
   useEffect(() => {
-    if (!restored) return;
+    if (!restored || inPlugin()) return;
     try {
       window.localStorage.setItem(ARRANGEMENT_KEY, JSON.stringify(serialiseArrangement(arrangement)));
     } catch {
