@@ -102,7 +102,13 @@ export function Keys({
             {chordLabels?.get(midi % 12) !== undefined ? (
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-[9px] font-bold uppercase tracking-[0.04em] leading-tight"
+                /*
+              NOT uppercased. "Cm" rendered through text-transform: uppercase
+              reads "CM", which to any musician is C MAJOR — the opposite
+              quality. Chords mode is the default, so every minor chord on the
+              keyboard was mislabelled as major.
+            */
+            className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-[9px] font-bold tracking-[0.04em] leading-tight"
                 style={{ color: isHeld ? 'var(--bg)' : 'var(--ink)' }}
               >
                 {chordLabels.get(midi % 12)}

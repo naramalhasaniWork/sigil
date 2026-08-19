@@ -35,6 +35,34 @@ function fromNorm(norm: number, min: number, max: number, curve: string): number
  * a plain-language explanation of why it matters. Dragging is for exploring,
  * typing is for finishing.
  */
+/**
+ * What a value looks like to a person, and how to read it back.
+ *
+ * `pct` parameters are stored 0..1 because that is what the DSP wants, and they
+ * were being PRINTED that way too — "0.481 PCT", which is not a percentage, is
+ * not 48%, and is not anything. 92 of the parameters in this instrument use
+ * that unit, so it was most of every Deep and FX row.
+ *
+ * The scaling lives in one place and is used by the readout, the editor and the
+ * value you type, so typing 48 gives you 48% rather than 4800%.
+ */
+const PCT_SCALE = 100;
+
+function toDisplay(value: number, unit: string): number {
+  return unit === 'pct' ? value * PCT_SCALE : value;
+}
+
+function fromDisplay(shown: number, unit: string): number {
+  return unit === 'pct' ? shown / PCT_SCALE : shown;
+}
+
+/** The symbol, not the internal unit name. "PCT" is a code word, not a unit. */
+function unitLabel(unit: string): string {
+  if (unit === 'none') return '';
+  if (unit === 'pct') return '%';
+  return unit;
+}
+
 export function ParamRow({
   name, value, defaultValue, min, max, unit, curve, explain, colour, onChange,
 }: ParamRowProps): JSX.Element {
@@ -46,9 +74,12 @@ export function ParamRow({
 
   const commit = useCallback((): void => {
     const parsed = Number.parseFloat(draft);
-    if (Number.isFinite(parsed)) onChange(Math.min(max, Math.max(min, parsed)));
+    if (Number.isFinite(parsed)) {
+      const real = fromDisplay(parsed, unit);
+      onChange(Math.min(max, Math.max(min, real)));
+    }
     setEditing(false);
-  }, [draft, min, max, onChange]);
+  }, [draft, min, max, onChange, unit]);
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
     if (!dragging.current) return;
@@ -123,12 +154,15 @@ export function ParamRow({
                 onChange(defaultValue);
                 return;
               }
-              setDraft(value.toPrecision(4));
+              setDraft(toDisplay(value, unit).toPrecision(4));
               setEditing(true);
             }}
           >
-            {value >= 1000 ? value.toFixed(0) : value.toPrecision(3)}
-            <span className="label ml-1">{unit === 'none' ? '' : unit}</span>
+            {(() => {
+              const shown = toDisplay(value, unit);
+              return shown >= 1000 ? shown.toFixed(0) : shown.toPrecision(3);
+            })()}
+            <span className="label ml-1">{unitLabel(unit)}</span>
           </button>
         )}
 
