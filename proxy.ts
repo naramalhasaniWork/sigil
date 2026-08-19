@@ -29,6 +29,17 @@ async function sha256Hex(text: string): Promise<string> {
 }
 
 export async function proxy(req: NextRequest): Promise<NextResponse> {
+  /*
+   * The public deployment has no door at all. It stores nothing server-side and
+   * has nothing to protect — a passcode there would only be a barrier between
+   * someone and the instrument, which is the opposite of the point.
+   *
+   * Checked before the passcode so that setting both is unambiguous: public
+   * wins, and there is no state where the public build quietly asks for a
+   * password nobody was given.
+   */
+  if (process.env.NEXT_PUBLIC_SIGIL_PUBLIC === '1') return NextResponse.next();
+
   const passcode = process.env.SIGIL_PASSCODE;
   if (!passcode) return NextResponse.next();
 

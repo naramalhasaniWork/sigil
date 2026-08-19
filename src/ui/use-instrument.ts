@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
 import { EngineHost } from '@/audio/engine-host';
+import {
+  createEngineHost, inPlugin, PluginEngineHost, type HostSnapshot, type RemoteUpdate,
+} from '@/audio/plugin-bridge';
 import { bouncePatch } from '@/audio/bounce';
 import { FX_DESCRIPTOR } from '@/dsp/fx-descriptor';
 import { FX_MAGIC_DESCRIPTOR } from '@/dsp/fx-magic-descriptor';
@@ -177,7 +180,7 @@ export function useInstrument() {
   }, []);
 
   const start = useCallback(async (): Promise<void> => {
-    hostRef.current ??= new EngineHost();
+    hostRef.current ??= createEngineHost();
     await hostRef.current.start();
     hostRef.current.setEngine(engineId);
     const v = values[engineId];
@@ -798,6 +801,14 @@ export function useInstrument() {
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
+    /*
+     * In a plugin the HOST owns the state, via getStateInformation. Reading
+     * localStorage here would pour whatever was last edited — in another track,
+     * in another project, in another instance — over the sound the session just
+     * restored. Every instance shares one WebView storage, so the key is not
+     * per-instance and never can be.
+     */
+    if (inPlugin()) return;
     try {
       const raw = window.localStorage.getItem(SESSION_KEY);
       if (raw === null) return;
@@ -857,6 +868,14 @@ export function useInstrument() {
       magic: toKeyed(FX_MAGIC_DESCRIPTOR, magicValues),
       bounceMs,
     };
+    /*
+     * And nothing is written back. Two SIGIL instances on two tracks would
+     * otherwise take turns overwriting one key, so the last one you touched
+     * would decide what every other one loaded next time. The host saves each
+     * instance separately with the project, which is what a plugin user
+     * expects and what localStorage cannot do.
+     */
+    if (inPlugin()) return;
     try {
       window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     } catch {
@@ -990,6 +1009,62 @@ export function useInstrument() {
     setMacros([...snap.macros]);
     setActivePresetId(snap.presetId);
   }, [engineId]);
+
+  // ---- Plugin bridge ----------------------------------------------------
+  /*
+   * Inside the VST3 there is no worklet: the C++ port is the audio engine and
+   * the DAW's parameter list is the wire. `createEngineHost()` above already
+   * returns the bridge instead of an `EngineHost` when we are in the plugin's
+   * WebView; this is the other half — the inbound direction, so host automation
+   * moves the interface.
+   *
+   * Everything the callbacks need is read through a ref rather than captured,
+   * because this effect must run exactly once (the bridge is a long-lived
+   * object with one owner) while `setParamByAddress` and `selectEngine` are
+   * rebuilt whenever the engine changes.
+   */
+  const bridgeApi = useRef({ setParamByAddress, selectEngine });
+  bridgeApi.current = { setParamByAddress, selectEngine };
+
+  useEffect(() => {
+    if (!inPlugin()) return;
+    const host = (hostRef.current ??= createEngineHost());
+    if (!(host instanceof PluginEngineHost)) return;
+
+    /*
+     * The plugin holds every engine's values at once, and it is the truth on
+     * open — the localStorage session restored a moment ago belongs to some
+     * other project. Nothing is pushed back at the host here: this is the host
+     * talking.
+     */
+    host.onHydrate = (snap: HostSnapshot): void => {
+      const next: Record<string, Float32Array> = {};
+      for (const e of ENGINES) {
+        const r = fromKeyed(e.descriptor, snap.engines[e.descriptor.id], e.descriptor.name);
+        next[e.descriptor.id] = r.values;
+        // Macros measure from the patch they were centred on, not from the
+        // factory defaults — see anchorRef.
+        anchorRef.current[e.descriptor.id] = Float32Array.from(r.values);
+      }
+      setValues(next);
+      setFxValues(fromKeyed(FX_DESCRIPTOR, snap.fx, 'FX').values);
+      setMagicValues(fromKeyed(FX_MAGIC_DESCRIPTOR, snap.magic, 'Character').values);
+      if (ENGINES.some((e) => e.descriptor.id === snap.engineId)) setEngineId(snap.engineId);
+      setMacros([0.5, 0.5, 0.5, 0.5]);
+    };
+
+    host.onRemote = (update: RemoteUpdate): void => {
+      if (update.engineId !== undefined) bridgeApi.current.selectEngine(update.engineId);
+      for (const [address, value] of update.params) {
+        bridgeApi.current.setParamByAddress(address, value);
+      }
+    };
+
+    // There is no audio device to unlock and no gesture requirement, so the
+    // instrument is simply on. Without this the plugin opens behind a Power
+    // button that has nothing to power.
+    setStarted(true);
+  }, []);
 
   return {
     exportPatch, importPatch, applySound, restorePatch,

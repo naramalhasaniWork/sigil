@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import type { EngineDescriptor } from '@/audio/types';
+import { inPlugin } from '@/audio/plugin-bridge';
 import {
   DIVISIONS, DEFAULT_DIVISION_ID, divisionById, divisionMs, nearestDivision, clampSynced,
 } from '@/dsp/tempo';
@@ -22,6 +23,12 @@ const STORE_KEY = 'sigil.delaySync';
 interface Stored { readonly on: boolean; readonly divisionId: string }
 
 function load(): Stored {
+  /*
+   * Not remembered inside a plugin. Every instance shares one WebView storage,
+   * so a remembered division is one instance deciding what the others load —
+   * and this is effect state, which belongs to a track, not to the machine.
+   */
+  if (inPlugin()) return { on: false, divisionId: DEFAULT_DIVISION_ID };
   try {
     const raw = window.localStorage.getItem(STORE_KEY);
     if (raw === null) return { on: false, divisionId: DEFAULT_DIVISION_ID };
@@ -56,7 +63,7 @@ export function DelaySync({ descriptor, values, bpm, onChange, colour }: {
   useEffect(() => { setState(load()); setHydrated(true); }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || inPlugin()) return;
     try { window.localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch { /* fine */ }
   }, [state, hydrated]);
 

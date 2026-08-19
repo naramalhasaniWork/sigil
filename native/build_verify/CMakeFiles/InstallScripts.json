@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/naram/dev/sigil/native/build_verify/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

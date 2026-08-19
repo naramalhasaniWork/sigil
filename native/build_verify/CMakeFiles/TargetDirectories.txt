@@ -1,0 +1,4 @@
+/Users/naram/dev/sigil/native/build_verify/CMakeFiles/sigil_parity.dir
+/Users/naram/dev/sigil/native/build_verify/CMakeFiles/test.dir
+/Users/naram/dev/sigil/native/build_verify/CMakeFiles/edit_cache.dir
+/Users/naram/dev/sigil/native/build_verify/CMakeFiles/rebuild_cache.dir

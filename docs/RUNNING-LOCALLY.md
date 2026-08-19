@@ -90,3 +90,43 @@ require HTTPS for camera access. Use the deployed Railway URL for that.
   change.
 - The production build uses Turbopack and takes a few minutes on first run.
   Nothing is wrong if it sits on "Creating an optimized production build".
+
+## Building the plugin
+
+```bash
+pnpm run build:plugin
+```
+
+That does two things. First it builds the interface as a static export into
+`native/plugin/ui-bundle.cpp` — the same `app/` and `src/` the website uses, run
+through a throwaway Next project with `output: 'export'` so nothing about the
+normal build or the Railway deploy changes. Then it compiles the VST3 with that
+bundle compiled in, which is why the plugin works with no internet and nothing
+to install alongside it.
+
+The result is at
+`native/build-plugin/SIGIL_artefacts/Release/VST3/SIGIL.vst3`. Copy it to
+`~/Library/Audio/Plug-Ins/VST3/` and rescan in your DAW.
+
+**VST3 and Standalone only, never AudioUnit.** JUCE's AU client needs tooling
+that only ships with a full Xcode install, and this machine has Command Line
+Tools. An AU target would fail at build time, so there isn't one.
+
+The Standalone build, `SIGIL_artefacts/Release/Standalone/SIGIL.app`, is the
+same plugin in a window with its own audio device — the quickest way to look at
+a change without loading a DAW.
+
+### When the plugin window is blank
+
+A WebView fails silently: a broken editor and a working one are the same
+process with the same logs. Run the standalone from a terminal with the bridge
+self-test on and it will tell you what the page actually rendered and whether
+parameters move in both directions:
+
+```bash
+SIGIL_BRIDGE_SELFTEST=1 \
+  ./native/build-plugin/SIGIL_artefacts/Release/Standalone/SIGIL.app/Contents/MacOS/SIGIL
+```
+
+It writes `[sigil-selftest]` lines to stderr. Note that it *moves* parameters on
+purpose, so leave it off for normal use.

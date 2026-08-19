@@ -1,6 +1,8 @@
 'use client';
 
-import type { JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
+import { inPlugin } from '@/audio/plugin-bridge';
+import { IS_PUBLIC } from '@/ui/public-mode';
 
 export type Scope = 'sound' | 'song';
 
@@ -24,7 +26,26 @@ const SCOPES: readonly Scope[] = ['sound', 'song'];
  * Both buttons are 44px, because this is the switch you hit most often and it
  * is hit with a thumb.
  */
-export function ScopeSwitch({ scope, onScope, colour }: ScopeSwitchProps): JSX.Element {
+export function ScopeSwitch({ scope, onScope, colour }: ScopeSwitchProps): JSX.Element | null {
+  /*
+   * Hidden in two places, for the same reason: there is no arranger there, and
+   * a two-state control with one reachable state is worse than no control.
+   *
+   * - The PUBLIC build, where a stranger's first thirty seconds should be spent
+   *   on the instrument rather than on the least finished surface.
+   * - INSIDE A PLUGIN, where the DAW already owns arrangement. A second
+   *   timeline inside a device on a track is bloat at best, and at worst it
+   *   invites someone to arrange in the wrong place and lose the work.
+   *
+   * `inPlugin()` reads `window`, so it is resolved after mount rather than
+   * during render — the static export prerenders this component with no window
+   * at all, and branching on it directly would render the switch on the server
+   * and remove it on hydration.
+   */
+  const [hosted, setHosted] = useState(false);
+  useEffect(() => { setHosted(inPlugin()); }, []);
+  if (IS_PUBLIC || hosted) return null;
+
   return (
     <div
       role="group"

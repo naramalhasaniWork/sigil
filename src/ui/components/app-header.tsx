@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, type JSX } from 'react';
+import { AUTHOR_NAME, AUTHOR_URL, IS_PUBLIC } from '@/ui/public-mode';
 import { SigilWordmark } from './engine-mark';
 import { Transport } from './transport';
 
@@ -48,6 +49,27 @@ export function AppHeader({
         >
           <SigilWordmark size={21} />
         </button>
+
+        {/*
+          Byline, public build only. On the owner's own instance it would be
+          telling him who made it.
+
+          Sits beside the mark rather than in a footer because this interface
+          has no footer to speak of — the bottom of the screen is the keyboard.
+          Opens in a new tab, and carries rel="noopener" so the opened page
+          cannot reach back through window.opener.
+        */}
+        {IS_PUBLIC && (
+          <a
+            href={AUTHOR_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="label flex items-center"
+            style={{ minHeight: 44, color: 'var(--ink)', opacity: 0.7 }}
+          >
+            by {AUTHOR_NAME}
+          </a>
+        )}
         {snapshotState !== null && (
           <span
             className="border-[2px] px-1.5 py-0.5 text-[9px] font-bold tracking-[0.16em]"

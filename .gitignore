@@ -15,3 +15,9 @@ out/
 # C++ port build output. CMake emits compiler_depend.ts — a timestamp file, not
 # TypeScript — which tsc would otherwise try to compile.
 native/build/
+native/build-plugin/
+# The interface, staged and compiled in by scripts/build-plugin-ui.mjs. Both are
+# generated from app/ and src/ on every plugin build; ui-bundle.cpp is ~7MB of
+# escaped bytes and has no business in history.
+native/plugin/ui-stage/
+native/plugin/ui-bundle.cpp

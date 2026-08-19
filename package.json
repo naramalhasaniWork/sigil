@@ -8,6 +8,8 @@
     "build": "pnpm build:worklet && next build",
     "start": "next start",
     "build:worklet": "node scripts/build-worklet.mjs",
+    "build:plugin-ui": "node scripts/build-plugin-ui.mjs",
+    "build:plugin": "pnpm build:plugin-ui && cmake -S native -B native/build-plugin -DSIGIL_BUILD_PLUGIN=ON -DCMAKE_BUILD_TYPE=Release && cmake --build native/build-plugin --target SIGIL_VST3 -j8",
     "test": "NODE_OPTIONS=--expose-gc vitest run",
     "goldens": "node scripts/golden.mjs",
     "goldens:check": "node scripts/golden.mjs --check",
