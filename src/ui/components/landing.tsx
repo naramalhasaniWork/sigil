@@ -15,34 +15,36 @@ import { AUTHOR_NAME, AUTHOR_URL } from '@/ui/public-mode';
  */
 
 export const ENGINES: readonly { name: string; colour: string; what: string }[] = [
-  { name: 'ANALOG', colour: '#FF6B6B', what: 'Oscillators and a four-pole ladder filter that self-oscillates.' },
-  { name: 'FM', colour: '#4ECDC4', what: 'Operators and algorithms. Bells, basses and things with no name.' },
-  { name: 'PHYSICAL', colour: '#FFD93D', what: 'Struck and bowed matter. Wood, metal, glass, skin.' },
-  { name: 'GRANULAR', colour: '#8B5CF6', what: 'Sound cut into grains and rebuilt as clouds and textures.' },
-  { name: 'WAVETABLE', colour: '#FF9F45', what: 'Sweeping through tables of waveforms for movement that never settles.' },
-  { name: 'SAMPLER', colour: '#7BC96F', what: 'Your own audio, played back as an instrument.' },
+  { name: 'ANALOG', colour: '#FF6B6B', what: 'Classic subtractive voice with a four-pole ladder filter that self-oscillates. Basses, leads, pads.' },
+  { name: 'FM', colour: '#4ECDC4', what: 'Frequency modulation across multiple operator algorithms. Bells, electric pianos, metallic percussion.' },
+  { name: 'PHYSICAL', colour: '#FFD93D', what: 'Modelled resonators driven by struck and bowed excitation. Wood, metal, glass and skin.' },
+  { name: 'GRANULAR', colour: '#8B5CF6', what: 'Audio divided into grains and rebuilt as clouds, drones and evolving texture.' },
+  { name: 'WAVETABLE', colour: '#FF9F45', what: 'Scanning across banks of waveforms for timbres that move as they sound.' },
+  { name: 'SAMPLER', colour: '#7BC96F', what: 'Your own recordings, mapped and played back with the full filter and envelope chain.' },
 ];
 
 const IDEAS: readonly { title: string; body: string }[] = [
   {
-    title: 'Every control explains itself',
-    body: 'Each parameter carries a sentence saying what it does and what it is for. '
-      + 'No manual, no guessing which of thirty knobs is the one you want.',
+    title: 'Learn as you build',
+    body: 'Every parameter carries a plain description of what it does and when to reach for '
+      + 'it. Deep synthesis stays legible whether you have been doing this for a month or a '
+      + 'decade.',
   },
   {
     title: 'Find sounds by ear',
-    body: 'Hunt generates variations of what you have, plays them, and lets you keep the ones '
-      + 'you like and breed them together. Discovery without knowing the theory first.',
+    body: 'Hunt generates variations on the patch you are holding, auditions them, and breeds '
+      + 'together the ones you keep. A way of arriving somewhere you would not have designed '
+      + 'on purpose.',
   },
   {
-    title: 'Take it with you',
-    body: 'Bounce what you played to a WAV in one tap — at the exact sample rate the '
-      + 'Teenage Engineering KO II wants, so it lands on hardware ready to play.',
+    title: 'Built for hardware',
+    body: 'Bounce any sound to a WAV in a single tap, rendered at the sample rate the '
+      + 'Teenage Engineering KO II expects, so it loads onto the device ready to play.',
   },
   {
-    title: 'Nothing to install, nothing stored',
-    body: 'It runs in the browser. No account, no upload, no server holding your work — '
-      + 'your sounds stay on your own machine.',
+    title: 'Plays anywhere',
+    body: 'The full instrument runs in the browser on a laptop, a tablet or a phone, with '
+      + 'MIDI controller support and gesture control through the camera.',
   },
 ];
 
@@ -86,8 +88,8 @@ export function Landing({ buyUrl }: { buyUrl: string }): JSX.Element {
             className="leading-relaxed"
             style={{ fontSize: 19, color: 'var(--ink)', maxWidth: '52ch' }}
           >
-            Six synthesis engines in a browser. Open a link and play — no account,
-            no install, nothing stored anywhere but your own machine.
+            Six synthesis engines in one instrument. Design a sound in the browser,
+            then take it into your DAW.
           </p>
 
           <a
@@ -161,14 +163,12 @@ export function Landing({ buyUrl }: { buyUrl: string }): JSX.Element {
             className="leading-relaxed"
             style={{ fontSize: 16, color: 'var(--ink)', maxWidth: '54ch' }}
           >
-            The same six engines as a VST3 plugin. Every parameter automatable from
-            your timeline, saved with your project, rendered into your mix like any
-            other instrument.
+            All six engines as a VST3 plugin. Every parameter is automatable from the
+            timeline, patches are saved with the project, and the instrument renders
+            into your mix alongside everything else.
           </p>
           <p className="text-[13px] leading-relaxed" style={{ color: 'var(--ink)', opacity: 0.85 }}>
-            The audio is verified identical to what you just played in the browser —
-            197 automated checks compare the plugin against the web version sample
-            for sample, every build.
+            Sounds designed in the browser open in the plugin unchanged.
           </p>
 
           {buyUrl === '' ? (
