@@ -18,7 +18,13 @@ import { NextResponse, type NextRequest } from 'next/server';
  * client is not a browser — it cannot follow a redirect to a login form, so the
  * cookie gate would answer every tool call with a 307 to /gate.
  */
-const OPEN_PATHS = ['/gate', '/api/gate', '/api/health', '/api/mcp'];
+const OPEN_PATHS = [
+  '/gate', '/api/gate', '/api/health', '/api/mcp',
+  // The landing page is the public face and holds nothing private. Gating it
+  // would mean the one page meant to be shared and indexed was the one page
+  // nobody could read.
+  '/start',
+];
 
 async function sha256Hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
