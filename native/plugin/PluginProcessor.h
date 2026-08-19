@@ -144,7 +144,7 @@ private:
   std::array<UiEvent, kUiEventCapacity> uiEventBuffer_{};
 
   void pushUiEvent(const UiEvent& e);
-  void drainUiEvents();
+  void drainUiEvents(juce::MidiBuffer& out);
   std::vector<SigilParamRef> refs_;
   juce::AudioParameterChoice* engineParam_ = nullptr;
   int lastEngineIndex_ = -1;

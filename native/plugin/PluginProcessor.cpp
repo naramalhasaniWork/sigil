@@ -155,7 +155,10 @@ void SigilAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
   // Notes played on the plugin's own interface, before any host MIDI in this
   // block. They reach the same allocator by the same calls handleMidi() makes,
   // so there is one path from a note to a voice.
-  drainUiEvents();
+  // Collected here, emitted after the incoming buffer has been consumed and
+  // cleared below — a MidiBuffer cannot be appended to while it is iterated.
+  juce::MidiBuffer uiOut;
+  drainUiEvents(uiOut);
 
   // Sample-accurate MIDI: render up to each event, apply it, carry on. This is
   // the same shape as the segment-driven parity harness, so what the plugin
@@ -176,7 +179,21 @@ void SigilAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
   for (int ch = 2; ch < buffer.getNumChannels(); ++ch) {
     buffer.copyFrom(ch, 0, buffer, 0, 0, numSamples);
   }
+  /*
+   * Hand the host what was played on SIGIL's own keyboard.
+   *
+   * Incoming events are consumed above and dropped; an instrument does not pass
+   * its input through. What replaces them is the UI's own notes, so arming a
+   * track and playing the plugin's keys records real MIDI. Before this the
+   * clip was created and stayed empty, which looked like the recording failing
+   * rather than nothing having been sent.
+   *
+   * Timed at sample 0 rather than sample-accurately: a mouse or a computer key
+   * arrives on the message thread with no block position to recover, so the
+   * honest granularity is the block. That is the same latency you already hear.
+   */
   midi.clear();
+  midi.addEvents(uiOut, 0, numSamples, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -425,14 +442,23 @@ void SigilAudioProcessor::panicFromUi() {
   pushUiEvent(e);
 }
 
-void SigilAudioProcessor::drainUiEvents() {
+void SigilAudioProcessor::drainUiEvents(juce::MidiBuffer& out) {
   const auto scope = uiEvents_.read(uiEvents_.getNumReady());
-  auto apply = [this](int start, int count) {
+  auto apply = [this, &out](int start, int count) {
     for (int i = 0; i < count; ++i) {
       const UiEvent& e = uiEventBuffer_[static_cast<size_t>(start + i)];
-      if (e.panic) engine_.allNotesOff();
-      else if (e.on) engine_.noteOn(e.note, e.velocity);
-      else engine_.noteOff(e.note);
+      if (e.panic) {
+        engine_.allNotesOff();
+        // A panic is a state, not a note. All-notes-off on channel 1 is the
+        // message a host understands without inventing one per sounding voice.
+        out.addEvent(juce::MidiMessage::allNotesOff(1), 0);
+      } else if (e.on) {
+        engine_.noteOn(e.note, e.velocity);
+        out.addEvent(juce::MidiMessage::noteOn(1, e.note, e.velocity), 0);
+      } else {
+        engine_.noteOff(e.note);
+        out.addEvent(juce::MidiMessage::noteOff(1, e.note), 0);
+      }
     }
   };
   apply(scope.startIndex1, scope.blockSize1);

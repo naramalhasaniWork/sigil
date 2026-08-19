@@ -142,7 +142,10 @@ if(SIGIL_BUILD_PLUGIN)
     PRODUCT_NAME "SIGIL"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    NEEDS_MIDI_OUTPUT FALSE
+    # The on-screen keyboard emits MIDI so a DAW can record what you play on it.
+    # Without this a note played in SIGIL's own interface sounded but reached the
+    # host as nothing, so an armed track recorded an empty clip.
+    NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
