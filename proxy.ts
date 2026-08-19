@@ -33,6 +33,16 @@ const OPEN_PATHS = [
    */
   '/api/signup',
   /*
+   * The evidence the landing page is built from. Its screenshots and audio demos
+   * are referenced by that public page, so gating them served /start to a
+   * stranger with broken images and silent players — the exact opposite of the
+   * point, and not visible from inside an authenticated browser. They are
+   * marketing assets: a picture of the instrument and recordings of its own
+   * presets. Nothing private is in either.
+   */
+  '/shots/',
+  '/audio/',
+  /*
    * `/admin` is deliberately NOT here.
    *
    * It has its own lock (src/server/admin-auth.ts, SIGIL_ADMIN_KEY) which fails
