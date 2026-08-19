@@ -66,6 +66,15 @@ SigilAudioProcessorEditor::SigilAudioProcessorEditor(SigilAudioProcessor& p)
   }
   if (auto* engine = proc_.engineParam()) engine->addListener(this);
 
+  createWebView();
+  scheduleHealthCheck();
+
+  setResizable(true, true);
+  setResizeLimits(720, 480, 3000, 2000);
+  setSize(1180, 820);
+}
+
+void SigilAudioProcessorEditor::createWebView() {
   web_ = std::make_unique<juce::WebBrowserComponent>(
       juce::WebBrowserComponent::Options{}
           .withNativeIntegrationEnabled()
@@ -79,11 +88,46 @@ SigilAudioProcessorEditor::SigilAudioProcessorEditor(SigilAudioProcessor& p)
           }));
 
   addAndMakeVisible(*web_);
+  web_->setBounds(getLocalBounds());
   web_->goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
+}
 
-  setResizable(true, true);
-  setResizeLimits(720, 480, 3000, 2000);
-  setSize(1180, 820);
+void SigilAudioProcessorEditor::rebuildWebView() {
+  webFailures_ = 0;
+  createWebView();
+  // The page comes back empty of everything the processor told the old one, so
+  // it has to be told again. Without this the view returns and shows defaults
+  // over a patch that is still sounding.
+  sendSnapshot();
+}
+
+void SigilAudioProcessorEditor::scheduleHealthCheck() {
+  // Slow on purpose. This is a rescue path, not a render loop, and a plugin
+  // sitting open on a track should cost nothing to keep alive.
+  constexpr int kIntervalMs = 3000;
+  juce::Component::SafePointer<SigilAudioProcessorEditor> safe(this);
+
+  juce::Timer::callAfterDelay(kIntervalMs, [safe]() {
+    auto* self = safe.getComponent();
+    if (self == nullptr) return;
+
+    // A hidden editor is allowed to have no live page; asking would only
+    // provoke a rebuild nobody is looking at.
+    if (self->web_ == nullptr || !self->isShowing()) {
+      self->scheduleHealthCheck();
+      return;
+    }
+
+    juce::Component::SafePointer<SigilAudioProcessorEditor> again(self);
+    self->web_->evaluateJavascript(
+        "1", [again](juce::WebBrowserComponent::EvaluationResult r) {
+          auto* ed = again.getComponent();
+          if (ed == nullptr) return;
+          if (r.getResult() != nullptr) ed->webFailures_ = 0;
+          else if (++ed->webFailures_ >= 2) ed->rebuildWebView();
+          ed->scheduleHealthCheck();
+        });
+  });
 }
 
 SigilAudioProcessorEditor::~SigilAudioProcessorEditor() {

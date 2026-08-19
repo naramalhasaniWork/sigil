@@ -60,6 +60,29 @@ private:
   void timerCallback() override;
 
   // -- the page -------------------------------------------------------------
+  /** Builds the WebBrowserComponent and points it at the embedded bundle. */
+  void createWebView();
+
+  /**
+   * Watchdog for a dead web content process.
+   *
+   * JUCE handles didFailNavigation and didFailProvisionalNavigation, but not
+   * webViewWebContentProcessDidTerminate:. When WebKit loses the content
+   * process — memory pressure, a WebKit crash, the system reclaiming it from a
+   * plugin window that has been hidden for a while — the WKWebView is left
+   * blank and JUCE never reloads it. The editor stays empty for the rest of the
+   * session and closing and reopening the window is the only way back, which is
+   * exactly the "the window disappears" report this exists to answer.
+   *
+   * So the page is asked a trivial question on a slow heartbeat. Two
+   * consecutive failures rebuild the view. Two, not one, because a single
+   * evaluation can fail while a navigation is in flight and rebuilding a
+   * healthy page would throw away the view the player was in.
+   */
+  void scheduleHealthCheck();
+  void rebuildWebView();
+  int webFailures_ = 0;
+
   void handleMessageFromUi(const juce::var& payload);
   void sendSnapshot();
   juce::var snapshotVar() const;
