@@ -798,6 +798,28 @@ export function useInstrument() {
    */
   const [hydrated, setHydrated] = useState(false);
 
+  /*
+   * Which SIGIL this is — see ui/instance-identity.ts. Both come from the plugin
+   * and mean nothing in a browser, where there is exactly one instrument and the
+   * badge is not drawn at all.
+   */
+  const [instanceName, setInstanceNameState] = useState('');
+  const [instanceMark, setInstanceMark] = useState(0);
+  /**
+   * Whether the bridge found a plugin host. State rather than a call to
+   * `inPlugin()` during render: this page is statically prerendered with no
+   * `window`, so rendering the badge straight off that check would disagree with
+   * the first client paint and React would report a hydration mismatch.
+   */
+  const [inPluginHost, setInPluginHost] = useState(false);
+
+  /** Renames this instance. The plugin owns the name; this is the way in. */
+  const renameInstance = useCallback((next: string): void => {
+    setInstanceNameState(next);
+    const host = hostRef.current;
+    if (host instanceof PluginEngineHost) host.setInstanceName(next);
+  }, []);
+
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
@@ -1023,13 +1045,28 @@ export function useInstrument() {
    * object with one owner) while `setParamByAddress` and `selectEngine` are
    * rebuilt whenever the engine changes.
    */
-  const bridgeApi = useRef({ setParamByAddress, selectEngine });
-  bridgeApi.current = { setParamByAddress, selectEngine };
+  /**
+   * The engine changing because the HOST changed it.
+   *
+   * Deliberately not `selectEngine`, which pushes `values[id]` at the host — the
+   * right thing when a player clicks an engine, and destructive when the host is
+   * the one talking: the values this page holds for an engine it has not been
+   * showing are stale, and pushing them writes factory defaults over whatever
+   * the project just restored. The host already holds that engine's values; all
+   * that is wanted here is to show them.
+   */
+  const showEngine = useCallback((id: string): void => {
+    if (ENGINES.some((e) => e.descriptor.id === id)) setEngineId(id);
+  }, []);
+
+  const bridgeApi = useRef({ setParamByAddress, selectEngine, showEngine });
+  bridgeApi.current = { setParamByAddress, selectEngine, showEngine };
 
   useEffect(() => {
     if (!inPlugin()) return;
     const host = (hostRef.current ??= createEngineHost());
     if (!(host instanceof PluginEngineHost)) return;
+    setInPluginHost(true);
 
     /*
      * The plugin holds every engine's values at once, and it is the truth on
@@ -1050,11 +1087,13 @@ export function useInstrument() {
       setFxValues(fromKeyed(FX_DESCRIPTOR, snap.fx, 'FX').values);
       setMagicValues(fromKeyed(FX_MAGIC_DESCRIPTOR, snap.magic, 'Character').values);
       if (ENGINES.some((e) => e.descriptor.id === snap.engineId)) setEngineId(snap.engineId);
+      setInstanceNameState(snap.name);
+      setInstanceMark(snap.mark);
       setMacros([0.5, 0.5, 0.5, 0.5]);
     };
 
     host.onRemote = (update: RemoteUpdate): void => {
-      if (update.engineId !== undefined) bridgeApi.current.selectEngine(update.engineId);
+      if (update.engineId !== undefined) bridgeApi.current.showEngine(update.engineId);
       for (const [address, value] of update.params) {
         bridgeApi.current.setParamByAddress(address, value);
       }
@@ -1087,6 +1126,7 @@ export function useInstrument() {
     fxDescriptor: FX_DESCRIPTOR, fxValues, setFxParam,
     magicDescriptor: FX_MAGIC_DESCRIPTOR, magicValues, setMagicParam,
     status, setStatus, hydrated,
+    instanceName, instanceMark, renameInstance, inPluginHost,
     engineTrim: ENGINE_TRIM[engineId] ?? 1,
   };
 }

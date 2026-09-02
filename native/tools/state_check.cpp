@@ -203,6 +203,52 @@ int main() {
           "the inactive engines' values are restored too");
   }
 
+  // ---- instance identity travels with the patch ---------------------------
+  // Not a parameter (see PluginProcessor.h), so nothing else in this file
+  // covers it, and an identity that does not survive a save is no identity.
+  {
+    SigilAudioProcessor a;
+    SigilAudioProcessor b;
+    check(a.instanceMark() != b.instanceMark(),
+          "two instances are dealt different identities");
+
+    a.setInstanceName("  Bass  ");
+    check(a.instanceName() == "Bass", "a name is trimmed on the way in");
+
+    juce::MemoryBlock st;
+    a.getStateInformation(st);
+    const juce::String saved = juce::String::fromUTF8(static_cast<const char*>(st.getData()),
+                                                      static_cast<int>(st.getSize()));
+    check(saved.contains("\"instanceName\": \"Bass\""), "the name is in the state");
+    check(saved.contains("\"instanceMark\""), "the mark is in the state");
+
+    SigilAudioProcessor c;
+    c.setStateInformation(st.getData(), static_cast<int>(st.getSize()));
+    check(c.instanceName() == "Bass", "a reopened project gets its name back");
+    check(c.instanceMark() == a.instanceMark(), "a reopened project gets its mark back");
+
+    // And the next instance created after that must not be dealt the mark the
+    // restored one is already using.
+    SigilAudioProcessor d;
+    check(d.instanceMark() != c.instanceMark(),
+          "a new instance is not dealt a restored instance's identity");
+
+    // A patch from the web app, or from before this existed, carries neither.
+    // It must leave the identity alone rather than resetting it to instance 0.
+    SigilAudioProcessor e;
+    e.setInstanceName("Pad");
+    const int mark = e.instanceMark();
+    e.setStateInformation(webPatch.toRawUTF8(), static_cast<int>(webPatch.getNumBytesAsUTF8()));
+    check(e.instanceName() == "Pad", "a patch with no identity does not clear the name");
+    check(e.instanceMark() == mark, "a patch with no identity does not re-deal the mark");
+
+    // An over-long name is capped rather than allowed to push the transport off
+    // the header row.
+    SigilAudioProcessor f;
+    f.setInstanceName(juce::String::repeatedString("x", 200));
+    check(f.instanceName().length() == 24, "a name is capped at 24 characters");
+  }
+
   // ---- processBlock allocates nothing ------------------------------------
   {
     SigilAudioProcessor rt;

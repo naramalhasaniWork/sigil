@@ -86,6 +86,14 @@ public:
    *  never hidden. */
   juce::StringArray lastLoadWarnings() const;
 
+  /**
+   * A handful of values, short enough for one log line, chosen so that "is this
+   * the same patch" can be answered by eye: the active engine's first three
+   * parameters plus one from each of fx and magic. Only used by the opt-in
+   * diagnostic log - see plugin/diag.h for why that exists.
+   */
+  juce::String diagFingerprint() const;
+
   // -------------------------------------------------------------------------
   // Seams for the editor. The editor is a WebBrowserComponent hosting the real
   // SIGIL interface, so it needs to read and move parameters by ID and to play
@@ -102,6 +110,36 @@ public:
 
   /** The value the DSP is actually being fed - see SigilParamRef. */
   double exactValueOf(const SigilParamRef& r) const;
+
+  // -------------------------------------------------------------------------
+  // Instance identity.
+  //
+  // Several SIGILs in one project are indistinguishable: same window, same
+  // wordmark, same colours, and the DAW's own device title is the plugin's
+  // name, which VST3 gives no per-instance say over. So the instrument carries
+  // its own.
+  //
+  // Deliberately NOT a parameter. Parameters map to VST3 by index and inserting
+  // one repoints automation in every saved project (see buildParameters), a
+  // name is not a number, and no one wants an automation lane for it. It lives
+  // in the state JSON beside the patch, under keys the web app's loadPatch()
+  // ignores, so a patch stays portable.
+  // -------------------------------------------------------------------------
+
+  /** What the player called this one. Empty means it is still using the name
+   *  its mark was given. */
+  juce::String instanceName() const;
+
+  /** Renames, and tells the host the project changed so the name is saved. */
+  void setInstanceName(const juce::String& name);
+
+  /**
+   * Which identity this instance was dealt: an index the interface turns into a
+   * name and an accent colour. Assigned in order of creation so two instances
+   * are never dealt the same one, and then persisted, so a reopened project
+   * gets its identities back rather than re-dealing them.
+   */
+  int instanceMark() const noexcept { return instanceMark_; }
 
   /** Descriptor id of the engine currently selected, e.g. "analog". */
   juce::String activeEngineId() const;
@@ -151,6 +189,12 @@ private:
 
   juce::CriticalSection warningLock_;
   juce::StringArray loadWarnings_;
+
+  /** Guards instanceName_ only. The editor reads it from the message thread and
+   *  a state load writes it from whichever thread the host chose. */
+  mutable juce::CriticalSection nameLock_;
+  juce::String instanceName_;
+  int instanceMark_ = 0;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SigilAudioProcessor)
 };

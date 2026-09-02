@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 
+#include "diag.h"
 #include "ui-bundle.h"
 
 #include <cstdio>
@@ -72,6 +73,8 @@ SigilAudioProcessorEditor::SigilAudioProcessorEditor(SigilAudioProcessor& p)
   setResizable(true, true);
   setResizeLimits(720, 480, 3000, 2000);
   setSize(1180, 820);
+  sigil::diag::write(sigil::diag::tag(&p) + " editor opened, engine " + p.activeEngineId()
+                     + " " + p.diagFingerprint());
 }
 
 void SigilAudioProcessorEditor::createWebView() {
@@ -142,6 +145,7 @@ SigilAudioProcessorEditor::~SigilAudioProcessorEditor() {
     refs[i].param->removeListener(this);
   }
   if (auto* engine = proc_.engineParam()) engine->removeListener(this);
+  sigil::diag::write(sigil::diag::tag(&proc_) + " editor closed");
 }
 
 void SigilAudioProcessorEditor::resized() {
@@ -185,12 +189,38 @@ void SigilAudioProcessorEditor::handleAsyncUpdate() {
   }
 
   const bool engineMoved = engineDirty_.exchange(false);
-  if (changed == 0 && !engineMoved) return;
+
+  /*
+   * An engine change is sent as the WHOLE snapshot, not as a delta, and this is
+   * load-bearing rather than tidy.
+   *
+   * The processor holds all six engines' values at once. The page shows one, and
+   * it DROPS inbound values for the other five because it has nowhere to put
+   * them - so the values it holds for an engine it is not showing are whatever
+   * they were when it last had the truth, which after a state load is the
+   * factory defaults. The moment the selector moves, the page is suddenly
+   * showing an engine it never received values for, and it writes what it is
+   * holding back at us: measured, six restored parameters all snapped to their
+   * descriptor defaults the instant the engine changed. See the `engine` mode in
+   * tools/editor_check.cpp, which fails without this.
+   *
+   * A delta cannot fix that, because the values the page needs are exactly the
+   * ones it was never sent. The snapshot is every engine, so there is nothing
+   * stale left to push, and the page's snapshot handler pushes NOTHING back.
+   *
+   * The dirty flags are drained above rather than skipped, so nothing is left
+   * marked for a delta that is no longer coming.
+   */
+  if (engineMoved) {
+    sendSnapshot();
+    return;
+  }
+
+  if (changed == 0) return;
 
   auto* message = new juce::DynamicObject();
   message->setProperty("t", "params");
   message->setProperty("v", juce::var(values.get()));
-  if (engineMoved) message->setProperty("engine", proc_.activeEngineId());
   web_->emitEventIfBrowserIsVisible(kToUi, juce::var(message));
 }
 
@@ -225,6 +255,10 @@ juce::var SigilAudioProcessorEditor::snapshotVar() const {
   auto* root = new juce::DynamicObject();
   root->setProperty("t", "snapshot");
   root->setProperty("engineId", proc_.activeEngineId());
+  // Which SIGIL this is. Sent with every snapshot rather than once, because a
+  // rebuilt WebView (see scheduleHealthCheck) gets a page that knows nothing.
+  root->setProperty("name", proc_.instanceName());
+  root->setProperty("mark", proc_.instanceMark());
   root->setProperty("engines", juce::var(engines));
   root->setProperty("fx", juce::var(fx));
   root->setProperty("magic", juce::var(magic));
@@ -275,6 +309,8 @@ void SigilAudioProcessorEditor::handleMessageFromUi(const juce::var& payload) {
 
   if (type == "ready") {
     pageReady_.store(true);
+    sigil::diag::write(sigil::diag::tag(&proc_) + " page ready, sending snapshot: "
+                       + proc_.activeEngineId() + " " + proc_.diagFingerprint());
     sendSnapshot();
     if (std::getenv("SIGIL_BRIDGE_SELFTEST") != nullptr) runSelfTest();
     return;
@@ -286,6 +322,8 @@ void SigilAudioProcessorEditor::handleMessageFromUi(const juce::var& payload) {
     if (found == byId_.end()) return;
     const int refIndex = found->second;
     auto* param = proc_.paramRefs()[static_cast<size_t>(refIndex)].param;
+    sigil::diag::write(sigil::diag::tag(&proc_) + " page wrote " + id + "="
+                       + juce::String(static_cast<double>(payload["v"]), 4));
     beginOrRefreshGesture(refIndex);
     param->setValueNotifyingHost(
         param->convertTo0to1(static_cast<float>(static_cast<double>(payload["v"]))));
@@ -297,6 +335,9 @@ void SigilAudioProcessorEditor::handleMessageFromUi(const juce::var& payload) {
     if (!values.isObject()) return;
     auto* obj = values.getDynamicObject();
     if (obj == nullptr) return;
+    sigil::diag::write(sigil::diag::tag(&proc_) + " page wrote "
+                       + juce::String(obj->getProperties().size())
+                       + " parameters AT ONCE (this is the shape of an overwrite)");
     for (const auto& prop : obj->getProperties()) {
       const auto found = byId_.find(prop.name.toString());
       if (found == byId_.end()) continue;
@@ -311,6 +352,18 @@ void SigilAudioProcessorEditor::handleMessageFromUi(const juce::var& payload) {
 
   if (type == "engine") {
     proc_.setActiveEngineId(payload["id"].toString());
+    /*
+     * The page asked for this, so it does not need telling. Clearing the flag
+     * the parameter listener just set stops handleAsyncUpdate from sending the
+     * whole snapshot back — which would be correct but not free: hydrating
+     * re-centres the macro dials, and a page-driven engine change can be an
+     * undo that has just restored them deliberately.
+     *
+     * Safe to clear here because setActiveEngineId() runs the listener
+     * synchronously on this thread, while handleAsyncUpdate is a posted message
+     * that cannot have run yet.
+     */
+    engineDirty_.store(false);
     return;
   }
 
@@ -323,6 +376,14 @@ void SigilAudioProcessorEditor::handleMessageFromUi(const juce::var& payload) {
 
   if (type == "panic") {
     proc_.panicFromUi();
+    return;
+  }
+
+  if (type == "name") {
+    // No snapshot back: the page already shows what it just typed, and hydrating
+    // it would re-centre the macro dials under the player's hands.
+    proc_.setInstanceName(payload["v"].toString());
+    sigil::diag::write(sigil::diag::tag(&proc_) + " named \"" + proc_.instanceName() + "\"");
     return;
   }
 }

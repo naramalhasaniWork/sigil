@@ -291,4 +291,17 @@ if(SIGIL_BUILD_PLUGIN)
   add_test(NAME plugin_state COMMAND sigil_state_check)
   add_test(NAME plugin_host
     COMMAND sigil_host_check $<TARGET_BUNDLE_DIR:SIGIL_VST3>)
+
+  # The one editor check that IS worth a ctest entry, because it guards a patch
+  # that was measured to disappear: the host moving the engine selector while the
+  # page is showing a different engine, after which the page wrote its own stale
+  # values over six restored parameters. It needs a window server and a live
+  # WebView, so it reports 77 - ctest's skip code - rather than failing when
+  # there is no screen. The rest of sigil_editor_check stays out of ctest: those
+  # modes open several windows and run for a minute.
+  add_test(NAME plugin_engine_switch COMMAND sigil_editor_check)
+  set_tests_properties(plugin_engine_switch PROPERTIES
+    ENVIRONMENT "SIGIL_EDITOR_RESTORE=engine"
+    SKIP_RETURN_CODE 77
+    TIMEOUT 180)
 endif()

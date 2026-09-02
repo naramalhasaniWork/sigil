@@ -515,6 +515,13 @@ export default function Page(): JSX.Element {
         recording={inst.recording}
         bouncing={inst.bouncing}
         holdProps={eggs.holdProps as unknown as Record<string, unknown>}
+        instance={inst.inPluginHost
+          ? {
+            mark: inst.instanceMark,
+            name: inst.instanceName,
+            onRename: inst.renameInstance,
+          }
+          : null}
         onMarkDoubleClick={secrets.toggleAB}
         snapshotState={secrets.hasSnapshot ? (secrets.onSnapshot ? 'A' : 'B') : null}
         handPlaying={

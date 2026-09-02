@@ -1,8 +1,10 @@
 #include "PluginProcessor.h"
 
 #include "PluginEditor.h"
+#include "diag.h"
 #include "param-range.h"
 
+#include <atomic>
 #include <cmath>
 
 namespace {
@@ -22,12 +24,34 @@ double clampToRange(const sigil::desc::ParamDesc& p, double v) {
   return v < p.min ? p.min : (v > p.max ? p.max : v);
 }
 
+/**
+ * The next identity to deal out, shared by every instance in the process.
+ *
+ * Process-wide rather than per-project because that is the scope that matters:
+ * two SIGILs the player is looking at are in the same process whether or not
+ * they are in the same set. A restored instance adopts its SAVED mark and pushes
+ * this counter past it, so adding a new instance to a reopened project does not
+ * deal it an identity one of the restored ones already has.
+ */
+std::atomic<int> nextInstanceMark{0};
+
+int dealInstanceMark() { return nextInstanceMark.fetch_add(1); }
+
+void reserveInstanceMark(int mark) {
+  int seen = nextInstanceMark.load();
+  while (mark >= seen && !nextInstanceMark.compare_exchange_weak(seen, mark + 1)) {
+  }
+}
+
 }  // namespace
 
 SigilAudioProcessor::SigilAudioProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(),
                                                   true)) {
+  instanceMark_ = dealInstanceMark();
   buildParameters();
+  sigil::diag::write(sigil::diag::tag(this) + " constructed, "
+                     + juce::String(getParameters().size()) + " parameters");
 }
 
 void SigilAudioProcessor::buildParameters() {
@@ -74,14 +98,20 @@ void SigilAudioProcessor::buildParameters() {
   addSection(kMagicDesc, sigil::ParamSection::kMagic, -1, "magic.", "Character");
 }
 
-void SigilAudioProcessor::prepareToPlay(double sampleRate, int) {
+void SigilAudioProcessor::prepareToPlay(double sampleRate, int blockSize) {
+  sigil::diag::write(sigil::diag::tag(this) + " prepareToPlay " + juce::String(sampleRate)
+                     + " Hz / " + juce::String(blockSize) + " frames, engine now "
+                     + activeEngineId());
   engine_.prepare(sampleRate);
   lastEngineIndex_ = engineParam_->getIndex();
   engine_.setEngine(lastEngineIndex_);
   pushAllParameters();
 }
 
-void SigilAudioProcessor::releaseResources() { engine_.allNotesOff(); }
+void SigilAudioProcessor::releaseResources() {
+  sigil::diag::write(sigil::diag::tag(this) + " releaseResources");
+  engine_.allNotesOff();
+}
 
 bool SigilAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
   if (layouts.getMainInputChannels() != 0) return false;
@@ -246,16 +276,33 @@ void SigilAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   }
   root->setProperty("engines", juce::var(engines));
   root->setProperty("app", "sigil-vst3");
+  // "instanceName"/"instanceMark", not "name": the web app's patch format
+  // already uses "name" for what the SOUND is called, and these two describe
+  // the instance holding it. fromKeyed() ignores keys it does not know, so a
+  // plugin patch still loads on the web.
+  root->setProperty("instanceMark", instanceMark_);
+  const juce::String held = instanceName();
+  if (held.isNotEmpty()) root->setProperty("instanceName", held);
 
   const juce::String json = juce::JSON::toString(juce::var(root), false);
   destData.replaceAll(json.toRawUTF8(), json.getNumBytesAsUTF8());
+  sigil::diag::write(sigil::diag::tag(this) + " getStateInformation -> "
+                     + juce::String((int)json.getNumBytesAsUTF8()) + " bytes, engine "
+                     + juce::String(kEngines[active].id) + ", " + diagFingerprint());
 }
 
 void SigilAudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
   using namespace sigil::desc;
 
   juce::StringArray warnings;
-  if (data == nullptr || sizeInBytes <= 0) return;
+  sigil::diag::write(sigil::diag::tag(this) + " setStateInformation <- "
+                     + juce::String(sizeInBytes) + " bytes, prepared="
+                     + juce::String(engine_.prepared() ? 1 : 0) + ", was " + activeEngineId()
+                     + " " + diagFingerprint());
+  if (data == nullptr || sizeInBytes <= 0) {
+    sigil::diag::write(sigil::diag::tag(this) + " setStateInformation: nothing to load");
+    return;
+  }
 
   const juce::String text = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
   juce::var parsed;
@@ -346,6 +393,26 @@ void SigilAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 
   // Per-engine block first, then the active engine's "values" on top, so a
   // web-saved patch (which has no "engines" key) still lands correctly.
+  /*
+   * Identity before the sound, so a log line or a warning about this instance
+   * already carries the name the player gave it.
+   *
+   * A patch with no identity in it - anything the web app saved, or a set from
+   * before this existed - leaves the dealt mark and the dealt name alone rather
+   * than resetting them to instance zero.
+   */
+  if (parsed.hasProperty("instanceMark")) {
+    const int mark = static_cast<int>(parsed["instanceMark"]);
+    if (mark >= 0 && mark < 4096) {
+      instanceMark_ = mark;
+      reserveInstanceMark(mark);
+    }
+  }
+  if (parsed.hasProperty("instanceName")) {
+    const juce::ScopedLock sl(nameLock_);
+    instanceName_ = parsed["instanceName"].toString().trim().substring(0, 24);
+  }
+
   const juce::var engines = parsed["engines"];
   if (engines.isObject()) {
     for (int e = 0; e < kEngineCount; e++) {
@@ -383,6 +450,11 @@ void SigilAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     pushAllParameters();
   }
 
+  sigil::diag::write(sigil::diag::tag(this) + " setStateInformation done, now "
+                     + activeEngineId() + " " + diagFingerprint() + ", "
+                     + juce::String(warnings.size()) + " warning(s)");
+  for (const auto& w : warnings) sigil::diag::write(sigil::diag::tag(this) + "   " + w);
+
   const juce::ScopedLock sl(warningLock_);
   loadWarnings_ = warnings;
   for (const auto& w : warnings) juce::Logger::writeToLog("SIGIL state: " + w);
@@ -393,6 +465,24 @@ juce::StringArray SigilAudioProcessor::lastLoadWarnings() const {
   return loadWarnings_;
 }
 
+juce::String SigilAudioProcessor::diagFingerprint() const {
+  using namespace sigil::desc;
+  const int active = engineParam_->getIndex();
+  juce::String out;
+  int shown = 0;
+  for (const SigilParamRef& r : refs_) {
+    const bool wanted =
+        (r.section == sigil::ParamSection::kEngine && r.engineIndex == active && r.index < 3)
+        || (r.section == sigil::ParamSection::kFx && r.index == 0)
+        || (r.section == sigil::ParamSection::kMagic && r.index == 0);
+    if (!wanted) continue;
+    auto* wid = dynamic_cast<juce::AudioProcessorParameterWithID*>(r.param);
+    out << (shown++ > 0 ? " " : "") << (wid != nullptr ? wid->paramID : juce::String("?")) << "="
+        << juce::String(exactValueOf(r), 4);
+  }
+  return out;
+}
+
 juce::AudioProcessorEditor* SigilAudioProcessor::createEditor() {
   return new SigilAudioProcessorEditor(*this);
 }
@@ -400,6 +490,29 @@ juce::AudioProcessorEditor* SigilAudioProcessor::createEditor() {
 // ---------------------------------------------------------------------------
 // Editor seams.
 // ---------------------------------------------------------------------------
+juce::String SigilAudioProcessor::instanceName() const {
+  const juce::ScopedLock sl(nameLock_);
+  return instanceName_;
+}
+
+void SigilAudioProcessor::setInstanceName(const juce::String& name) {
+  {
+    const juce::ScopedLock sl(nameLock_);
+    // Trimmed and capped: this is drawn in a header, and a name long enough to
+    // push the transport off the row is not a name.
+    const juce::String next = name.trim().substring(0, 24);
+    if (next == instanceName_) return;
+    instanceName_ = next;
+  }
+  /*
+   * Without this the rename is not saved. It is not a parameter, so nothing has
+   * told the host the project changed, and closing the set would offer no
+   * prompt and lose it.
+   */
+  updateHostDisplay(
+      juce::AudioProcessorListener::ChangeDetails{}.withNonParameterStateChanged(true));
+}
+
 juce::String SigilAudioProcessor::activeEngineId() const {
   using namespace sigil::desc;
   const int i = engineParam_->getIndex();
@@ -412,6 +525,7 @@ void SigilAudioProcessor::setActiveEngineId(const juce::String& id) {
   for (int e = 0; e < kEngineCount; e++) {
     if (id != kEngines[e].id) continue;
     if (engineParam_->getIndex() == e) return;
+    sigil::diag::write(sigil::diag::tag(this) + " page selected engine " + id);
     engineParam_->beginChangeGesture();
     engineParam_->setValueNotifyingHost(engineParam_->convertTo0to1(static_cast<float>(e)));
     engineParam_->endChangeGesture();

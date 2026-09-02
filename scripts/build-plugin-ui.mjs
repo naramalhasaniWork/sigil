@@ -11,12 +11,16 @@
  *    never read and never modified, so `pnpm build` and the Railway deploy are
  *    untouched by anything in this file.
  *
- *    The staging copy drops app/api, app/gate and the metadata image routes.
- *    Not to trim the bundle - `output: 'export'` REFUSES to build a route
- *    handler that is not declared static, and those five routes are exactly
- *    that. None of them mean anything in a plugin: there is no passcode gate on
- *    a thing you already installed, and nothing is going to render a social card
- *    for an audio unit.
+ *    The staging copy drops app/api, app/gate, app/admin and the metadata image
+ *    routes - see DROP below. Not to trim the bundle: `output: 'export'` REFUSES
+ *    to build a route handler or a force-dynamic page, and every entry in that
+ *    list is one of those. None of them mean anything in a plugin either: there
+ *    is no passcode gate on a thing you already installed, nothing is going to
+ *    render a social card for an audio unit, and the plugin has no database.
+ *
+ *    A route added to app/ that this list does not know about does not degrade -
+ *    it fails the whole export, and with it the plugin build. If `next build`
+ *    here complains about "output: export", the fix is one more line in DROP.
  *
  *    node_modules is not copied. Staging lives inside the repo, so Node's own
  *    upward resolution finds the root install - which also means a symlink,
@@ -42,6 +46,11 @@ const generated = join(root, 'native', 'plugin', 'ui-bundle.cpp');
 const DROP = [
   'app/api',
   'app/gate',
+  // The signup admin view: a force-dynamic page plus two route handlers that
+  // read the database. `output: 'export'` refuses all three, so leaving it in
+  // breaks the plugin build outright - which it did, silently, from the commit
+  // that added it until this line.
+  'app/admin',
   'app/icon.tsx',
   'app/apple-icon.tsx',
   'app/opengraph-image.tsx',

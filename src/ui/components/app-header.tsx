@@ -3,6 +3,7 @@
 import { useRef, type JSX } from 'react';
 import { AUTHOR_NAME, AUTHOR_URL, IS_PUBLIC } from '@/ui/public-mode';
 import { SigilWordmark } from './engine-mark';
+import { InstanceBadge } from './instance-badge';
 import { Transport } from './transport';
 
 interface AppHeaderProps {
@@ -24,12 +25,18 @@ interface AppHeaderProps {
   onToggleRecord: () => void;
   onBounce: () => void;
   onSampleFile: (file: File) => void;
+  /**
+   * Which SIGIL this is, or null outside the plugin. See instance-badge.tsx:
+   * with several instances in a project nothing else on screen tells them
+   * apart, and the DAW's own device title cannot.
+   */
+  instance: { mark: number; name: string; onRename: (next: string) => void } | null;
 }
 
 export function AppHeader({
   engineName, sampleName, midiLabel, colour, running, recording, bouncing,
   holdProps, onMarkDoubleClick, snapshotState, handPlaying,
-  onPower, onToggleRecord, onBounce, onSampleFile,
+  onPower, onToggleRecord, onBounce, onSampleFile, instance,
 }: AppHeaderProps): JSX.Element {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -49,6 +56,17 @@ export function AppHeader({
         >
           <SigilWordmark size={21} />
         </button>
+
+        {/* Immediately after the mark, because "which one is this" is the first
+            question a second instance creates and the answer should not need
+            looking for. */}
+        {instance !== null && (
+          <InstanceBadge
+            mark={instance.mark}
+            name={instance.name}
+            onRename={instance.onRename}
+          />
+        )}
 
         {/*
           Byline, public build only. On the owner's own instance it would be

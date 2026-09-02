@@ -73,11 +73,25 @@ export interface HostSnapshot {
   engines: Record<string, Record<string, number>>;
   fx: Record<string, number>;
   magic: Record<string, number>;
+  /** What the player called this instance. Empty means it still answers to the
+   *  name its mark was dealt. */
+  name: string;
+  /** Which identity this instance was dealt — see `identityFor`. */
+  mark: number;
 }
 
 /** One parameter moved by the host — already resolved to a flat address. */
 export interface RemoteUpdate {
-  /** Present only when the host moved the engine selector. */
+  /**
+   * Present only when the host moved the engine selector.
+   *
+   * The current plugin never sets it: an engine change is sent as a whole
+   * snapshot instead, because the values this page holds for an engine it has
+   * not been showing are stale and a delta cannot repair them. It stays on the
+   * wire, and `useInstrument` still handles it WITHOUT pushing anything back,
+   * because an older plugin paired with this page is exactly the case where
+   * pushing would write factory defaults over a restored patch.
+   */
   engineId?: string;
   /** Flat addresses, as `setParamByAddress` takes them. */
   params: ReadonlyArray<readonly [number, number]>;
@@ -223,7 +237,15 @@ export class PluginEngineHost extends EngineHost {
         engines[k] = numbers(v);
       }
     }
-    return { engineId, engines, fx: numbers(msg['fx']), magic: numbers(msg['magic']) };
+    const mark = msg['mark'];
+    return {
+      engineId,
+      engines,
+      fx: numbers(msg['fx']),
+      magic: numbers(msg['magic']),
+      name: typeof msg['name'] === 'string' ? msg['name'] : '',
+      mark: typeof mark === 'number' && Number.isFinite(mark) ? Math.trunc(mark) : 0,
+    };
   }
 
   // -- outbound -----------------------------------------------------------
@@ -283,6 +305,18 @@ export class PluginEngineHost extends EngineHost {
       if (change !== null) out[change[0]] = change[1];
     }
     if (Object.keys(out).length > 0) this.send({ t: 'params', v: out });
+  }
+
+  /**
+   * Renames this instance.
+   *
+   * Not guarded by `synced`, unlike every other outbound call. The rule those
+   * follow exists to stop a stale SOUND being poured over a restored one, and a
+   * name the player just typed is neither stale nor a sound — dropping it would
+   * mean a rename made in the first second after opening silently did nothing.
+   */
+  setInstanceName(name: string): void {
+    this.send({ t: 'name', v: name });
   }
 
   override noteOn(note: number, velocity: number): void {
