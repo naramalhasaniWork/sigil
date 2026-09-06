@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, type JSX } from 'react';
+import { useRef, type JSX, type ReactNode } from 'react';
 import { AUTHOR_NAME, AUTHOR_URL, IS_PUBLIC } from '@/ui/public-mode';
 import { SigilWordmark } from './engine-mark';
 import { InstanceBadge } from './instance-badge';
@@ -31,21 +31,39 @@ interface AppHeaderProps {
    * apart, and the DAW's own device title cannot.
    */
   instance: { mark: number; name: string; onRename: (next: string) => void } | null;
+  /**
+   * Scope, undo/redo and the shortcut key — the controls that must be reachable
+   * from every tab at every width.
+   *
+   * They used to live in the tab strip. At 375px that strip held 562px of tabs
+   * in a 240px scroller, so EXPORT, SETUP and the SOUND/SONG switch were off the
+   * end of a hairline scrollbar while undo, redo and ? took 132 of the 375. Up
+   * here they are always visible and the strip below is nothing but tabs.
+   */
+  tools?: ReactNode;
 }
 
 export function AppHeader({
   engineName, sampleName, midiLabel, colour, running, recording, bouncing,
   holdProps, onMarkDoubleClick, snapshotState, handPlaying,
-  onPower, onToggleRecord, onBounce, onSampleFile, instance,
+  onPower, onToggleRecord, onBounce, onSampleFile, instance, tools,
 }: AppHeaderProps): JSX.Element {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   return (
+    /*
+     * shrink-0: the header is one of three fixed bands in a viewport-height
+     * column (header, scrolling body, play surface). It must never be squeezed
+     * and it must never scroll away — the Export tab's own instruction is "hold
+     * a chord and hit Bounce WAV", which was physically impossible on a 13"
+     * screen when reaching the keys pushed the transport off the top.
+     */
     <header
-      className="flex items-center justify-between border-b-4 px-4 py-2.5 gap-3 flex-wrap"
+      className="shrink-0 flex items-center justify-between border-b-4
+                 px-2 md:px-4 py-1.5 md:py-2.5 gap-x-2 gap-y-1.5 flex-wrap"
       style={{ borderColor: 'var(--ink)' }}
     >
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 md:gap-3 flex-wrap min-w-0">
         <button
           type="button"
           aria-label="SIGIL"
@@ -82,7 +100,7 @@ export function AppHeader({
             href={AUTHOR_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="label flex items-center"
+            className="label hidden md:flex items-center"
             style={{ minHeight: 44, color: 'var(--ink)', opacity: 0.7 }}
           >
             by {AUTHOR_NAME}

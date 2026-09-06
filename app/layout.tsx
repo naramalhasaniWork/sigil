@@ -72,12 +72,24 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: '#0E0E0E',
-  // The instrument is a fixed control surface; pinch-zooming it just breaks the
-  // layout, and viewport-fit lets the pads reach under the home indicator.
+  /*
+   * ZOOM IS ALLOWED. `maximumScale: 1, userScalable: false` used to live here to
+   * protect the two-finger XY pad from pinch-zoom, and it is a WCAG 1.4.4
+   * failure: anyone who needs text at 200% could not get it, on the one surface
+   * in this instrument that is mostly 9px labels.
+   *
+   * The lock was also the wrong tool. Pinch only reached the page because the
+   * play surfaces let it: the XY pad, the pads and the keys all now declare
+   * `touch-action: none`, which stops pinch, double-tap zoom and scroll ON THOSE
+   * ELEMENTS while leaving the rest of the page zoomable. The gesture is
+   * protected where it matters and nowhere else.
+   *
+   * viewport-fit lets the pads reach under the home indicator; the play surface
+   * pads itself with env(safe-area-inset-bottom) so nothing playable sits under
+   * it.
+   */
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: 'cover',
 };
 

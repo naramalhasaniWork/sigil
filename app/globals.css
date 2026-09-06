@@ -15,7 +15,20 @@ html, body { background: var(--bg); }
 body {
   color: var(--ink);
   font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
+  /*
+   * The instrument owns the whole viewport and scrolls INSIDE itself, so a
+   * flick that runs past the end of a panel must not drag the page — on iOS
+   * that rubber-band pulls the pinned keyboard off the bottom of the screen
+   * mid-phrase.
+   */
+  overscroll-behavior: none;
 }
+
+/*
+ * The play surface reaches to the physical bottom edge (viewport-fit: cover),
+ * so it pads itself out of the home indicator's way. Zero everywhere else.
+ */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
 
 .hard { box-shadow: 4px 4px 0 0 var(--ink); }
 .hard:active { transform: translate(2px, 2px); box-shadow: none; }
