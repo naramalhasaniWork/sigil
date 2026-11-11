@@ -21,3 +21,6 @@ native/build-plugin/
 # escaped bytes and has no business in history.
 native/plugin/ui-stage/
 native/plugin/ui-bundle.cpp
+
+# Private business material — kept local, never published
+docs/business/

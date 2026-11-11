@@ -166,3 +166,11 @@ Carry them across when porting.
 
 **`--muted` text and sub-44px targets keep coming back.** Both have been fixed
 more than once.
+
+---
+
+## License
+
+Source-available, all rights reserved. You may read the code and run it locally
+for yourself. Redistribution, resale, or shipping it in another product needs
+written permission.
