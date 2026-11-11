@@ -1,176 +1,156 @@
-# SIGIL
+<p align="center">
+  <img src=".github/readme/hero.svg" width="100%" alt="SIGIL, a sound-design instrument. Six synthesis engines (analog, FM, physical, granular, wavetable, sampler), each shown as a live oscilloscope trace.">
+</p>
 
-A sound-design instrument. Six synthesis engines that run in a browser tab, and
-the same six as a VST3 plugin — the plugin's audio is checked against the web
-version sample-for-sample on every build.
+<p align="center">
+  <a href="https://sigil-production-26de.up.railway.app/start"><b>Play it in your browser</b></a> ·
+  <a href="#run-it-locally">Run it locally</a> ·
+  <a href="#build-the-plugin">Build the plugin</a> ·
+  <a href="docs/MCP.md">Compose with Claude (MCP)</a>
+</p>
 
-- **Web:** https://sigil-production-26de.up.railway.app/start
-- **Plugin:** macOS, VST3, Apple Silicon. `$49` when it goes on sale.
+SIGIL is a synthesizer for designing sounds. It runs in a browser tab, and the same engines run as a VST3
+plugin and a standalone app on macOS. The plugin's audio is checked against the web version sample for
+sample on every build, so a patch sounds the same in both.
 
----
+## The six engines
 
-## What is in here
+| | Engine | What it does |
+|---|---|---|
+| <img src=".github/readme/mark-analog.svg" width="24" height="24" alt=""> | **Analog** | Subtractive, with a four-pole ladder filter that self-oscillates. |
+| <img src=".github/readme/mark-fm.svg" width="24" height="24" alt=""> | **FM** | Four operators across the classic algorithms. Bells, electric pianos, metal. |
+| <img src=".github/readme/mark-physical.svg" width="24" height="24" alt=""> | **Physical** | Modelled resonators, struck or bowed. Wood, metal, glass and skin. |
+| <img src=".github/readme/mark-granular.svg" width="24" height="24" alt=""> | **Granular** | Audio cut into grains and rebuilt as clouds and drones. |
+| <img src=".github/readme/mark-wavetable.svg" width="24" height="24" alt=""> | **Wavetable** | Scanning banks of waveforms, so the timbre moves as it sounds. |
+| <img src=".github/readme/mark-sampler.svg" width="24" height="24" alt=""> | **Sampler** | Your own recordings, through the same filters and envelopes. |
 
-| | |
-|---|---|
-| `src/dsp/` | The synthesis. Plain TypeScript, zero allocation in render loops, no browser APIs. |
-| `src/audio/` | The bridge between the DSP and whatever is hosting it — an AudioWorklet in a browser, a plugin processor in a DAW. |
-| `src/ui/` | The interface. React, used by both the web app and the plugin. |
-| `app/` | Next 16 routes: the instrument at `/`, the landing page at `/start`, `/admin`, the API. |
-| `native/` | The C++ port of `src/dsp`, and the JUCE plugin built around it. |
-| `docs/` | Design rulings, the sound audit, and the business material. |
+Every engine shares one effects chain and one character chain. There are about 84 presets across the six
+banks, and **Hunt** breeds new patches from the ones you keep.
 
-### Six engines
+## Run it locally
 
-`analog` · `fm` · `physical` · `granular` · `wavetable` · `sampler`
-
-Plus an effects chain and a character chain, both available on every engine.
-Around 84 presets across the six banks.
-
----
-
-## Running it
+You need **Node 22+** and **pnpm**.
 
 ```bash
+git clone https://github.com/naramalhasaniWork/sigil.git
+cd sigil
 pnpm install
-pnpm dev            # http://localhost:3000
+pnpm dev
 ```
 
-There is only ever **one** dev server — `next dev` refuses a second instance, so
-if a start fails, one is already up.
+Open http://localhost:3000. There is no passcode locally.
 
-`SIGIL.command` in the repo root is a double-clickable launcher for the desktop
-app; `docs/RUNNING-LOCALLY.md` covers it, including which browsers support what.
+> [!TIP]
+> Not a developer? Double-click **`SIGIL.command`** in the project folder instead. It installs what's
+> missing, builds once, and opens the instrument in your browser. Details and per-browser support
+> (MIDI, drag-to-DAW, camera hand tracking) are in [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md).
 
-### The gate
+`next dev` refuses to start a second instance, so if `pnpm dev` fails, one is already running.
 
-Set `SIGIL_PASSCODE` and the whole app sits behind a shared passcode. Leave it
-unset locally and the gate stays open.
+### Configuration
 
-Set `NEXT_PUBLIC_SIGIL_PUBLIC=1` and it becomes the public build instead: no
-gate at all, the arranger hidden, a `by naram` byline. One environment variable
-rather than a fork, because a fork would be behind on every fix within a week.
+Nothing is required to run locally. These only matter when you deploy.
 
----
+| Variable | What it does |
+|---|---|
+| `SIGIL_PASSCODE` | Puts the whole app behind a shared passcode. Unset means open. |
+| `NEXT_PUBLIC_SIGIL_PUBLIC=1` | The public build: no gate, arranger hidden, a `by naram` byline. |
+| `SIGIL_ADMIN_KEY` | Enables `/admin` (sign-up list and export). |
+| `SIGIL_MCP_TOKENS` | Bearer tokens for the MCP server. Mint one with `node scripts/mcp-token.mjs <name>`. |
+| `DATABASE_URL` | Postgres for sign-ups. Without it they are kept in memory. |
+| `NEXT_PUBLIC_SITE_URL` | Absolute URL for social cards on a custom domain. |
 
-## The two implementations, and the gate that keeps them honest
+## Build the plugin
 
-`src/dsp/` is the reference. `native/src/` is a hand-written C++ port of it. They
-have to make **the same sound**, and the only way to know that is to measure it:
+macOS on Apple Silicon. You need CMake 3.20+, the Xcode Command Line Tools, and a JUCE checkout.
 
 ```bash
-pnpm run drift      # regenerate goldens from the TS, then measure the C++
+# 1. JUCE, once
+git clone https://github.com/juce-framework/JUCE.git ~/JUCE
+
+# 2. Bundle the interface into the plugin. Run this every time the UI changes.
+node scripts/build-plugin-ui.mjs
+
+# 3. Configure and build
+cmake -S native -B native/build-plugin -DSIGIL_BUILD_PLUGIN=ON
+cmake --build native/build-plugin --config Release
+
+# 4. Test, then install
+(cd native/build-plugin && ctest)
+cp -R native/build-plugin/SIGIL_artefacts/Release/VST3/SIGIL.vst3 ~/Library/Audio/Plug-Ins/VST3/
 ```
 
-That renders golden buffers from the **current** TypeScript and compares the C++
-against them — 197 checks. Change a coefficient in `src/dsp/` and it goes red
-until `native/src/` is changed to match. That is the gate doing its job.
+A Standalone `.app` is built next to the VST3. It's the fastest way to try a change without a DAW.
 
-Checked-in goldens that were trusted rather than regenerated would defeat the
-whole point: they drift with the code that produced them and nobody notices.
+> [!WARNING]
+> Skipping step 2 ships an old interface without any error. It once went unnoticed for a day.
 
-**So: any change to `src/dsp/` must be mirrored in `native/src/`.**
+**In Ableton Live:** quit Live completely before testing a new build, because a running Live keeps the
+plugin it loaded at launch. Then turn on **Settings → Plug-Ins → Use VST3 Plug-In System Folders**. More
+in [docs/ableton-today.md](docs/ableton-today.md).
 
----
+**Logging:** create `~/Library/Logs/SIGIL/on` and the plugin writes its lifecycle (state save and restore,
+editor open, every parameter the page writes) to `~/Library/Logs/SIGIL/plugin.log`. Delete the file to
+turn it off. It never touches the audio thread.
+
+## One DSP, two hosts
+
+<p align="center">
+  <img src=".github/readme/two-hosts.svg" width="100%" alt="One DSP, two hosts. src/dsp in TypeScript is the reference; it runs in an AudioWorklet in the browser, and a hand-written C++ port in native/src runs inside JUCE as a VST3 plugin and Standalone app. pnpm run drift compares the two, sample for sample, on every build.">
+</p>
+
+`src/dsp/` is the reference implementation. `native/src/` is a hand-written C++ port of it, and the two have
+to make the same sound. The drift gate measures that:
+
+```bash
+pnpm run drift      # render goldens from the current TypeScript, then compare the C++ (197 checks)
+```
+
+Goldens are regenerated from the TypeScript on every run instead of being checked in, so they can't drift
+along with the code that made them. **Any change to `src/dsp/` must be mirrored in `native/src/`.**
 
 ## Tests
 
 ```bash
-pnpm test                                   # ~954 tests
+pnpm test                                   # about 954 tests
 NODE_OPTIONS=--expose-gc npx vitest run     # what CI runs
 ```
 
-The `--expose-gc` matters. Several tests assert that render loops allocate
-nothing, and without a real `gc()` they silently pass while measuring nothing —
-which is exactly what happened for a while before it was caught.
+Keep `--expose-gc`. Several tests assert that render loops allocate nothing, and without a real `gc()`
+they pass while measuring nothing.
 
-Two disciplines worth knowing before adding to the suite:
+When you add a test, break the code it covers and watch it fail. Three tests here once passed against
+deliberately broken code. And a green suite is not a working instrument: open it in a browser and play it.
 
-- **A test that cannot fail is worse than no test.** Three were found here that
-  passed against deliberately broken code. When you add one, break the thing it
-  covers and watch it go red.
-- **Green tests are not a working app.** More than one agent has reported a
-  passing suite while the instrument was visibly broken in a browser. Look at it.
+## What's where
 
----
+| Path | Contents |
+|---|---|
+| `src/dsp/` | The synthesis. Plain TypeScript, no allocation in render loops, no browser APIs. |
+| `src/audio/` | The bridge from DSP to host: an AudioWorklet in the browser, a processor in the plugin. |
+| `src/ui/` | The interface. React, shared by the web app and the plugin. |
+| `src/mcp/` | The MCP server's tools ([docs/MCP.md](docs/MCP.md)). |
+| `app/` | Next.js routes: the instrument at `/`, the landing page at `/start`, `/admin`, the API. |
+| `native/` | The C++ port of `src/dsp` and the JUCE plugin around it. |
+| `docs/` | Design rulings, the sound audit, running locally, MCP. |
 
-## The plugin
+## Working on the code
 
-```bash
-node scripts/build-plugin-ui.mjs                    # MUST run first if the UI changed
-cmake --build native/build-plugin --config Release
-cd native/build-plugin && ctest                     # 6 tests
-```
+**Parameters are appended, never inserted.** The plugin maps parameters to VST3 parameters by index, so
+inserting one mid-list re-targets automation in every saved project. Patches are keyed by id
+(`src/audio/patch-format.ts`); host automation is not.
 
-Then copy `native/build-plugin/SIGIL_artefacts/Release/VST3/SIGIL.vst3` to
-`~/Library/Audio/Plug-Ins/VST3/`.
+**The worklet is a separate realm.** It is bundled on its own and holds its own copy of every module.
+State set on the main thread never reaches it.
 
-**Skipping the UI build step is a real trap** — it went unnoticed for a day once,
-and every "rebuilt and reinstalled" in that window was quietly shipping a
-fortnight-old page.
+**Denormal and NaN guards in the DSP are load-bearing.** Carry them across when porting.
 
-A Standalone `.app` is built alongside the VST3 and is the fastest way to try a
-change without a DAW.
-
-### Ableton
-
-Quit Live completely before testing a new build — a running Live holds the plugin
-it loaded at launch. Then **Settings → Plug-Ins → "Use VST3 Plug-In System
-Folders" must be ON**; if it is off, Live never looks in the folder the plugin is
-in and nothing else you do will help. `docs/ableton-today.md` has the rest.
-
-### Diagnostics
-
-The plugin can log its own lifecycle — state save and restore, editor open, and
-every parameter the page writes:
-
-```bash
-mkdir -p ~/Library/Logs/SIGIL && touch ~/Library/Logs/SIGIL/on
-# launch the host; the flag is read once per process
-# ... reproduce ...
-rm ~/Library/Logs/SIGIL/on
-```
-
-It writes to `~/Library/Logs/SIGIL/plugin.log`, is off unless that flag exists,
-and never touches `processBlock`.
-
----
-
-## Design rules
-
-Midnight neo-brutalism, and these are not preferences:
-
-- `--bg #0E0E0E` · `--panel #171717` · `--ink #F5F1E6`
-- 3px borders, sharp corners, flat fills. **No gradients, no blur, no soft
-  shadows.** Hard offset shadows only on things you can press.
-- **`--muted` (#7D786C) on `--panel` is 4.14:1 and fails WCAG AA.** Anything
-  meant to be read is `--ink`. `--muted` is for hairlines.
-- **44px minimum touch targets.** The instrument is used on a phone.
-- Max 300 lines per file. TypeScript strict, no `any`.
-
----
-
-## Things that will bite you
-
-**Parameters are appended, never inserted.** The plugin maps descriptor
-parameters to VST3 parameters by index, so inserting one mid-list silently
-re-targets automation in every saved project. Patches themselves are keyed by
-id — that is what `src/audio/patch-format.ts` is for — but the host's automation
-is not.
-
-**The worklet is a separate realm.** It is bundled independently and holds its
-own copy of every module. Module state set on the main thread never reaches it.
-
-**Denormal and NaN guards in the DSP are load-bearing**, not defensive noise.
-Carry them across when porting.
-
-**`--muted` text and sub-44px targets keep coming back.** Both have been fixed
-more than once.
-
----
+**Design rules.** Midnight neo-brutalism: `#0E0E0E` background, `#171717` panels, `#F5F1E6` ink, 3px
+borders, sharp corners, flat fills, hard offset shadows only on things you can press. No gradients or
+blur. Readable text is ink, never `--muted` (it fails WCAG AA on panels). Touch targets are at least
+44px, because people play it on a phone. Files stay under 300 lines, TypeScript strict, no `any`.
 
 ## License
 
-Source-available, all rights reserved. You may read the code and run it locally
-for yourself. Redistribution, resale, or shipping it in another product needs
-written permission.
+Source-available, all rights reserved. You may read the code and run it locally for yourself.
+Redistribution, resale, or shipping it in another product needs written permission.
